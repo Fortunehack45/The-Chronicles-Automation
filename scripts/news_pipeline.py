@@ -1540,7 +1540,8 @@ Provide only the long-form broadsheet journalistic piece.
     try:
         interaction = gemini_client.interactions.create(
             model="gemini-3.5-flash-lite",
-            input=prompt
+            input=prompt,
+            generation_config={'max_output_tokens': 16384}
         )
         return interaction.output_text or ""
     except Exception as e:

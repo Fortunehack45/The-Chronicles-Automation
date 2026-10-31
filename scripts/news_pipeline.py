@@ -1636,7 +1636,32 @@ def clean_and_format_article_html(html: str) -> str:
     h = re.sub(r'</blockquote>\s*<p>\s*</blockquote>', r'</blockquote>', h)
     h = re.sub(r'</blockquote>\s*<p>(?=\s*<(?:h[1-6]|div|figure|blockquote|table)|$)', r'</blockquote>', h)
 
-    # 6. Standardize blockquotes into exactly ONE clean broadsheet pullquote with correct speaker attribution
+    # 6. Merge adjacent blockquotes or <p> tags where the second is an attribution (e.g. <blockquote>— Will Packer</blockquote>)
+    adj_bq_regex = re.compile(
+        r'<blockquote\b[^>]*>([\s\S]*?)</blockquote>\s*'
+        r'<blockquote\b[^>]*>\s*(?:<p[^>]*>)?\s*(?:&ldquo;|“|"|\'|‘|\s)*(?:&mdash;|—|-{1,2}|–)\s*([\s\S]*?)\s*(?:&rdquo;|”|"|\'|’|\s)*(?:</p>)?\s*</blockquote>',
+        re.IGNORECASE
+    )
+    while adj_bq_regex.search(h):
+        def repl_adj_bq(m):
+            q_inner = m.group(1).strip()
+            spk = re.sub(r'</?[a-z0-9]+[^>]*>', '', m.group(2)).strip(' \t\r\n\'"“”’‘-—–.')
+            return f'<blockquote>{q_inner}<footer>{spk}</footer></blockquote>'
+        h = adj_bq_regex.sub(repl_adj_bq, h)
+
+    adj_p_regex = re.compile(
+        r'<blockquote\b[^>]*>([\s\S]*?)</blockquote>\s*'
+        r'<p[^>]*>\s*(?:&ldquo;|“|"|\'|‘|\s)*(?:&mdash;|—|-{1,2}|–)\s*([A-Z][a-zA-Z\s.,\'"-]{3,80}?)\s*(?:&rdquo;|”|"|\'|’|\s)*</p>',
+        re.IGNORECASE
+    )
+    while adj_p_regex.search(h):
+        def repl_adj_p(m):
+            q_inner = m.group(1).strip()
+            spk = re.sub(r'</?[a-z0-9]+[^>]*>', '', m.group(2)).strip(' \t\r\n\'"“”’‘-—–.')
+            return f'<blockquote>{q_inner}<footer>{spk}</footer></blockquote>'
+        h = adj_p_regex.sub(repl_adj_p, h)
+
+    # 7. Standardize blockquotes into exactly ONE clean broadsheet pullquote with correct speaker attribution
     def format_bq_match(match):
         full_prev = match.group(1)
         bq_content = match.group(2)
@@ -1647,6 +1672,14 @@ def clean_and_format_article_html(html: str) -> str:
             if not any(k in raw_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
                 speaker = raw_spk
             bq_content = re.sub(r'<(?:footer|figcaption)[^>]*>.*?</(?:footer|figcaption)>', '', bq_content, flags=re.IGNORECASE | re.DOTALL)
+
+        if not speaker:
+            end_spk_match = re.search(r'(?:&mdash;|—|-{1,2}|–)\s*([A-Z][a-zA-Z\s.,\'"-]{3,80})$', bq_content.strip())
+            if end_spk_match:
+                raw_spk = re.sub(r'<[^>]+>', '', end_spk_match.group(1)).strip(' \t\r\n\'"“”’‘-—–.')
+                if not any(k in raw_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']) and len(raw_spk) > 2:
+                    speaker = raw_spk
+                    bq_content = bq_content[:end_spk_match.start()].strip()
 
         if not speaker and full_prev:
             prev_chunk = full_prev[-450:]
@@ -1680,7 +1713,8 @@ def clean_and_format_article_html(html: str) -> str:
         if quote_text and not quote_text.endswith(('.', '!', '?')):
             quote_text += '.'
 
-        if not quote_text:
+        # Discard isolated attribution blockquote that has no quote content
+        if not quote_text or re.match(r'^(?:&mdash;|—|-{1,2}|–)\s*[A-Z]', quote_text):
             return full_prev
 
         fig_cap = f'<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{speaker}</span></figcaption>' if speaker else ''

@@ -717,9 +717,48 @@ def sanitize_paragraph_quotes(text: str) -> str:
 def classify_article_beat(title: str, text: str, fallback_cat: str = "") -> str:
     """
     Intelligently classifies news dispatches across all 11 broadsheet beats.
-    Inspects headline syntax first, geographic and topical signals, and respects feed fallback.
-    Never defaults to 'NIGERIA' if the subject or geography is foreign or belongs to a topical beat.
+    Uses Gemini AI first to scan headline & body for high-precision journalistic categorization.
+    Falls back to robust regex rules. Never assigns NIGERIA unless genuinely about Nigeria.
     """
+    valid_beats = {'NIGERIA', 'WORLD', 'POLITICS', 'FINANCE', 'TECHNOLOGY', 'SCIENCE', 'LIFESTYLE', 'FASHION', 'CELEBRITY', 'SPORT', 'EDUCATION'}
+
+    # 0. High-Precision AI Categorization via Gemini
+    if gemini_client:
+        try:
+            ai_prompt = f"""You are the Chief Editor of The Chronicles broadsheet newspaper.
+Classify this news article into exactly ONE category from:
+[NIGERIA, WORLD, POLITICS, FINANCE, TECHNOLOGY, SCIENCE, SPORT, EDUCATION, FASHION, CELEBRITY, LIFESTYLE]
+
+Headline: {title}
+Snippet: {text[:600]}
+
+RULES:
+- 'NIGERIA': Use ONLY if genuinely and directly about Nigeria (Nigerian federal/state government, Nigerian states like Lagos/Abuja/Kano/Rivers, Nigerian leaders like Tinubu/Sanwo-Olu, Nigerian institutions like EFCC/CBN, Nigerian society/events).
+- If about Sudan, Kenya, South Africa, Egypt, or other non-Nigeria international affairs/conflicts, classify as 'WORLD'.
+- If about US/UK/European politics, elections, Trump, GOP, Democrats, Congress, Parliament, classify as 'POLITICS'.
+- If about AI, software, cloud, chips, big tech, data centers, classify as 'TECHNOLOGY'.
+- If about Wall St, IPOs, stocks, valuations, investments, banking, currencies, crypto, classify as 'FINANCE'.
+- If about space, meteorites, NASA, biology, physics, climate science, classify as 'SCIENCE'.
+- If about football, Premier League, NBA, boxing, Olympics, classify as 'SPORT'.
+- If about universities, colleges, student testing, academia, classify as 'EDUCATION'.
+- If about runway, haute couture, luxury fashion, designers, classify as 'FASHION'.
+- If about movies, film, Hollywood, Nollywood, actors, Grammys, Oscars, classify as 'CELEBRITY'.
+- If about wellness, culinary, travel, mental health, architecture, living, classify as 'LIFESTYLE'.
+
+Respond ONLY with the single category name in uppercase, nothing else.
+"""
+            interaction = gemini_client.interactions.create(
+                model='gemini-3.5-flash-lite',
+                input=ai_prompt
+            )
+            detected = getattr(interaction, 'output_text', '').strip().upper()
+            detected = re.sub(r'[^A-Z]', '', detected)
+            if detected in valid_beats:
+                logger.info(f"Gemini AI accurately classified '{title[:45]}...' as [{detected}]")
+                return detected
+        except Exception as e:
+            logger.warning(f"Gemini category classification fallback for '{title[:35]}': {e}")
+
     title_lower = title.lower()
     combined_sample = f"{title} {text[:800]}".lower()
 
@@ -870,16 +909,19 @@ def classify_article_beat(title: str, text: str, fallback_cat: str = "") -> str:
         return best_cat
 
     # If fallback_cat is valid and non-empty, prioritize it
-    valid_beats = {'NIGERIA', 'WORLD', 'POLITICS', 'FINANCE', 'TECHNOLOGY', 'SCIENCE', 'LIFESTYLE', 'FASHION', 'CELEBRITY', 'SPORT', 'EDUCATION'}
+    has_nigeria_kw = bool(re.search(r'\b(nigeria|nigerian|lagos|abuja|kano|rivers|zamfara|borno|enugu|kaduna|ibadan|delta|edo|tinubu|shettima|efcc|cbn|sanwo-olu|fubara|wike)\b', combined))
     if fallback_cat and fallback_cat.upper() in valid_beats:
-        if is_foreign_geo and fallback_cat.upper() == 'NIGERIA':
-            return 'WORLD'
+        if fallback_cat.upper() == 'NIGERIA' and not has_nigeria_kw:
+            return 'WORLD' if is_foreign_geo else 'POLITICS'
         return fallback_cat.upper()
 
     if is_foreign_geo:
         return 'WORLD'
 
-    return 'NIGERIA'
+    if has_nigeria_kw:
+        return 'NIGERIA'
+
+    return 'WORLD'
 
 
 from email.utils import parsedate_to_datetime
@@ -1982,27 +2024,37 @@ def main():
         logger.info(f" Multi-Sector Engine: Active | Press Photo Watermark: Active | 1,000+ Words: Active")
         logger.info(f"================================================================================")
         cycle_num = 1
+        target_interval_secs = args.interval * 60
+
         while True:
+            cycle_start = time.time()
             try:
                 logger.info(f"--- Starting Sweep Cycle #{cycle_num} ---")
                 published = run_pipeline(batch_size=args.batch_size, beat=args.beat, dry_run=args.dry_run)
                 if published == 0:
-                    logger.info(f"No new breaking dispatches detected across wire feeds. Waiting {args.interval} minute(s)...")
+                    logger.info(f"No new breaking dispatches detected across wire feeds.")
                 else:
-                    logger.info(f"Cycle #{cycle_num} complete. Published {published} stories. Waiting {args.interval} minute(s) until next sweep...")
+                    logger.info(f"Cycle #{cycle_num} complete. Published {published} stories.")
             except KeyboardInterrupt:
                 logger.info("Daemon gracefully stopped by user.")
                 break
             except Exception as e:
                 logger.error(f"Error during scheduled sweep cycle #{cycle_num}: {e}")
-                logger.info(f"Retrying in {args.interval} minute(s)...")
+
+            elapsed = time.time() - cycle_start
+            sleep_secs = max(0.0, target_interval_secs - elapsed)
 
             if args.max_cycles > 0 and cycle_num >= args.max_cycles:
-                logger.info(f"Reached requested max cycles ({args.max_cycles}). Exiting gracefully.")
+                logger.info(f"Cycle #{cycle_num} reached requested max cycles ({args.max_cycles}).")
+                if sleep_secs > 0:
+                    logger.info(f"Sleeping remaining {sleep_secs:.1f}s to maintain exact {args.interval}-minute cadence before handoff...")
+                    time.sleep(sleep_secs)
+                logger.info("Exiting gracefully for next daemon runner handoff.")
                 break
 
             cycle_num += 1
-            time.sleep(args.interval * 60)
+            logger.info(f"Sweep cycle took {elapsed:.1f}s. Sleeping {sleep_secs:.1f}s until cycle #{cycle_num}...")
+            time.sleep(sleep_secs)
     else:
         run_pipeline(batch_size=args.batch_size, beat=args.beat, dry_run=args.dry_run)
 

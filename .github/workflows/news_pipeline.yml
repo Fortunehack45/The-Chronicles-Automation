@@ -2,18 +2,22 @@ name: The Chronicles 24/7 Automated News Wire Daemon
 
 on:
   schedule:
-    # Triggers every 10 minutes (backed by continuous internal daemon loops)
+    # Watchdog cron: triggers every 10 minutes if runner ever stops
     - cron: '*/10 * * * *'
-  workflow_dispatch: # Allows manual 1-click trigger
+  workflow_dispatch: # Allows manual 1-click trigger or automated runner handoff
 
 concurrency:
   group: news-wire-automation
   cancel-in-progress: false
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   ingest-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 80
 
     steps:
       - name: Checkout Automation Repository
@@ -30,10 +34,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Execute News Wire Ingestion Daemon (Every 7–8 Minutes Continuous Loop)
+      - name: Execute News Wire Ingestion Daemon (Every 10 Minutes Continuous Loop)
+        id: news_daemon
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python scripts/news_pipeline.py --daemon --interval 8 --max-cycles 5 --batch-size 5
+          python scripts/news_pipeline.py --daemon --interval 10 --max-cycles 6 --batch-size 5
+
+      - name: Relay To Next 24/7 Runner (Zero Downtime Continuous Loop)
+        if: always() && steps.news_daemon.outcome != 'cancelled'
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Handoff to next 24/7 daemon runner..."
+          gh workflow run news_pipeline.yml --repo Fortunehack45/The-Chronicles-Automation || true

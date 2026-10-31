@@ -2,8 +2,8 @@ name: The Chronicles 24/7 Automated News Wire Daemon
 
 on:
   schedule:
-    # Runs continuously 24/7 across GitHub Actions runners
-    - cron: '*/5 * * * *'
+    # Triggers every 10 minutes (backed by continuous internal daemon loops)
+    - cron: '*/10 * * * *'
   workflow_dispatch: # Allows manual 1-click trigger
 
 concurrency:
@@ -13,7 +13,7 @@ concurrency:
 jobs:
   ingest-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 50
 
     steps:
       - name: Checkout Automation Repository
@@ -30,10 +30,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Execute News Wire Ingestion Daemon (1-Minute Sweep Loop, 10 News/Min)
+      - name: Execute News Wire Ingestion Daemon (Every 7–8 Minutes Continuous Loop)
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python scripts/news_pipeline.py --daemon --interval 1 --max-cycles 5 --batch-size 10
+          python scripts/news_pipeline.py --daemon --interval 8 --max-cycles 5 --batch-size 5

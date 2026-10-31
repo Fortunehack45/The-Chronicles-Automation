@@ -38,6 +38,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Tuple, Set
+from collections import Counter, defaultdict
 
 # Ensure current script directory is in python search path
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -339,7 +340,7 @@ VERIFIED_FEEDS = [
         'name': 'BBC World News',
         'region': 'global',
         'default_category': 'WORLD',
-        'url': 'http://feeds.bbci.co.uk/news/world/rss.xml',
+        'url': 'https://feeds.bbci.co.uk/news/world/rss.xml',
         'default_dateline': 'LONDON',
     },
     {
@@ -347,23 +348,55 @@ VERIFIED_FEEDS = [
         'name': 'BBC Technology',
         'region': 'global',
         'default_category': 'TECHNOLOGY',
-        'url': 'http://feeds.bbci.co.uk/news/technology/rss.xml',
+        'url': 'https://feeds.bbci.co.uk/news/technology/rss.xml',
         'default_dateline': 'SAN FRANCISCO',
+    },
+    {
+        'id': 'techcrunch',
+        'name': 'TechCrunch',
+        'region': 'global',
+        'default_category': 'TECHNOLOGY',
+        'url': 'https://techcrunch.com/feed/',
+        'default_dateline': 'SAN FRANCISCO',
+    },
+    {
+        'id': 'the_verge',
+        'name': 'The Verge',
+        'region': 'global',
+        'default_category': 'TECHNOLOGY',
+        'url': 'https://www.theverge.com/rss/index.xml',
+        'default_dateline': 'NEW YORK',
     },
     {
         'id': 'bbc_science',
         'name': 'BBC Science & Environment',
         'region': 'global',
         'default_category': 'SCIENCE',
-        'url': 'http://feeds.bbci.co.uk/news/science_and_environment/rss.xml',
+        'url': 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml',
         'default_dateline': 'CAMBRIDGE',
+    },
+    {
+        'id': 'sciencedaily',
+        'name': 'ScienceDaily',
+        'region': 'global',
+        'default_category': 'SCIENCE',
+        'url': 'https://www.sciencedaily.com/rss/all.xml',
+        'default_dateline': 'WASHINGTON',
     },
     {
         'id': 'bbc_arts',
         'name': 'BBC Entertainment & Arts',
         'region': 'global',
         'default_category': 'LIFESTYLE',
-        'url': 'http://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml',
+        'url': 'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml',
+        'default_dateline': 'LONDON',
+    },
+    {
+        'id': 'guardian_lifestyle',
+        'name': 'The Guardian Lifestyle',
+        'region': 'global',
+        'default_category': 'LIFESTYLE',
+        'url': 'https://www.theguardian.com/lifeandstyle/rss',
         'default_dateline': 'LONDON',
     },
     {
@@ -371,7 +404,15 @@ VERIFIED_FEEDS = [
         'name': 'BBC Sport',
         'region': 'global',
         'default_category': 'SPORT',
-        'url': 'http://feeds.bbci.co.uk/sport/rss.xml',
+        'url': 'https://feeds.bbci.co.uk/sport/rss.xml',
+        'default_dateline': 'LONDON',
+    },
+    {
+        'id': 'guardian_sport',
+        'name': 'The Guardian Sport',
+        'region': 'global',
+        'default_category': 'SPORT',
+        'url': 'https://www.theguardian.com/sport/rss',
         'default_dateline': 'LONDON',
     },
     {
@@ -379,7 +420,7 @@ VERIFIED_FEEDS = [
         'name': 'BBC Business',
         'region': 'global',
         'default_category': 'FINANCE',
-        'url': 'http://feeds.bbci.co.uk/news/business/rss.xml',
+        'url': 'https://feeds.bbci.co.uk/news/business/rss.xml',
         'default_dateline': 'NEW YORK',
     },
     {
@@ -436,6 +477,14 @@ VERIFIED_FEEDS = [
         'region': 'global',
         'default_category': 'FASHION',
         'url': 'https://fashionista.com/.rss/full/',
+        'default_dateline': 'PARIS',
+    },
+    {
+        'id': 'vogue_mag',
+        'name': 'Vogue Magazine',
+        'region': 'global',
+        'default_category': 'FASHION',
+        'url': 'https://www.vogue.com/feed/rss',
         'default_dateline': 'PARIS',
     },
     {
@@ -1549,6 +1598,163 @@ Provide only the long-form broadsheet journalistic piece.
         return ""
 
 
+def clean_and_format_article_html(html: str) -> str:
+    """
+    Cleans and structures raw HTML into publication-grade broadsheet formatting:
+    - Converts ASCII/Markdown tables into responsive HTML broadsheet data tables
+    - Converts blockquotes into styled broadsheet pullquote figures with crimson bars
+    - Strips markdown hashes (##, ###) and AI artifacts from headings
+    - Fixes spacing after punctuation (. , : ;)
+    - Purges empty tags and stray paragraphs
+    """
+    if not html:
+        return ""
+
+    # 1. Normalize mojibake characters
+    h = html.replace("\uFFFD", "'")
+    h = h.replace("\u0092", "'").replace("\u0091", "'")
+    h = h.replace("\u0093", '"').replace("\u0094", '"')
+
+    # 2. Fix headings: remove markdown hashes and AI labels (e.g. <h3>## Title</h3>)
+    h = re.sub(r'<h3([^>]*)>\s*(?:#{1,4}\s*|(?:Section\s+Heading|Chapter\s+\d+|Section\s+\d+|Part\s+\d+|Heading):\s*)+', r'<h3\1>', h, flags=re.IGNORECASE)
+
+    # 3. Fix broken blockquote wrappers and stray tags
+    h = re.sub(r'</p>\s*<p>\s*</blockquote>', r'</p></blockquote>', h)
+    h = re.sub(r'<p>\s*</blockquote>', r'</blockquote>', h)
+    h = re.sub(r'</blockquote>\s*<p>\s*</blockquote>', r'</blockquote>', h)
+    h = re.sub(r'</blockquote>\s*<p>(?=\s*<(?:h[1-6]|div|figure|blockquote|table)|$)', r'</blockquote>', h)
+
+    # 4. Standardize blockquotes into professional broadsheet pullquotes
+    def format_bq_match(match):
+        bq_content = match.group(0)
+        speaker = ""
+        footer_match = re.search(r'<footer[^>]*>\s*(?:&mdash;|—|-)?\s*(.*?)\s*<\/footer>', bq_content, flags=re.IGNORECASE | re.DOTALL)
+        if footer_match:
+            raw_spk = re.sub(r'<[^>]+>', '', footer_match.group(1)).strip('\'"-— \t\r\n')
+            if not any(k in raw_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
+                speaker = raw_spk
+            bq_content = re.sub(r'<footer[^>]*>.*?<\/footer>', '', bq_content, flags=re.IGNORECASE | re.DOTALL)
+
+        quote_text = re.sub(r'<\/?(?:p|blockquote)[^>]*>', '', bq_content).strip()
+        quote_text = re.sub(r'<p>\s*<\/p>', '', quote_text).strip()
+        quote_text = re.sub(r'^(?:&ldquo;|“|"|\'|‘|\s)+|(?:&rdquo;|”|"|\'|’|\s)+$', '', quote_text).strip()
+        quote_text = re.sub(r'[,;]\.([”"’\'])', r'.\1', quote_text)
+        quote_text = re.sub(r'\.[,;]([”"’\'])', r'.\1', quote_text)
+        quote_text = re.sub(r'([.,;!?])[.,;!?]+', r'\1', quote_text)
+        if quote_text and not quote_text.endswith(('.', '!', '?')):
+            quote_text += '.'
+
+        if not quote_text:
+            return ''
+
+        fig_cap = f'<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{speaker}</span></figcaption>' if speaker else ''
+        return f'<figure class="my-8 py-5 px-6 border-l-4 border-[#E50914] bg-[#161616]/80 rounded-r-xs shadow-md"><blockquote class="font-editorial italic text-stone-100 text-lg sm:text-xl leading-relaxed">&ldquo;{quote_text}&rdquo;</blockquote>{fig_cap}</figure>'
+
+    h = re.sub(r'<blockquote\b[^>]*>.*?<\/blockquote>', format_bq_match, h, flags=re.IGNORECASE | re.DOTALL)
+
+    # 5. Convert ASCII and Markdown tables into responsive broadsheet tables
+    p_pattern = re.compile(r'(?:<p>\s*([A-Z0-9\s()&;:/\.,\'\"-]{4,90})\s*<\/p>\s*)?((?:<p>\s*(?:\+[-+]+\+|\|[^\n<]+)\s*<\/p>\s*){2,})', re.IGNORECASE)
+
+    def replace_table_block(m):
+        pre_title = m.group(1)
+        raw_block = m.group(2)
+
+        if pre_title:
+            pt_clean = pre_title.strip()
+            if len(pt_clean.split()) > 12 or pt_clean.endswith('.'):
+                lead_html = f'<p>{pre_title}</p>'
+                title = None
+            else:
+                lead_html = ''
+                title = pt_clean
+        else:
+            lead_html = ''
+            title = None
+
+        raw_lines = re.findall(r'<p>\s*(.*?)\s*<\/p>', raw_block)
+        rows = []
+        is_diagram = False
+
+        for line in raw_lines:
+            l = line.strip()
+            if re.match(r'^\+[-+=]+\+$', l) or re.match(r'^\|[-+=|]+\|$', l):
+                continue
+            if '<---' in l or '--->' in l or re.search(r'\s+\^\s+', l):
+                is_diagram = True
+
+            if l.startswith('|') and l.endswith('|'):
+                inner = l[1:-1]
+                cols = [c.strip() for c in inner.split('|')]
+                rows.append(cols)
+            elif l.startswith('|'):
+                inner = l[1:]
+                cols = [c.strip() for c in inner.split('|')]
+                rows.append(cols)
+            else:
+                rows.append([l])
+
+        if not rows:
+            return m.group(0)
+
+        if len(rows[0]) == 1 and not title:
+            cand = rows[0][0].strip(' -*•')
+            if len(cand) > 3 and (cand.isupper() or len(cand.split()) <= 10):
+                title = cand
+                rows = rows[1:]
+
+        if not rows:
+            return m.group(0)
+
+        if is_diagram:
+            raw_text = '\n'.join([re.sub(r'^\||\|$', '', l.strip()) for l in raw_lines if not re.match(r'^\+[-+=]+\+$', l.strip())])
+            title_html = f'<div class="p-3 font-editorial font-bold text-stone-200 uppercase tracking-wider bg-[#1B1B1B] border-b border-[#2D2D2D]">{title}</div>' if title else ''
+            return f'{lead_html}<div class="my-6 border border-[#2D2D2D] rounded-xs bg-[#161616] overflow-hidden">{title_html}<pre class="p-4 overflow-x-auto font-mono text-xs sm:text-sm text-stone-300 leading-relaxed bg-[#111111]">{raw_text}</pre></div>'
+
+        col_counts = [len(r) for r in rows]
+        max_cols = max(col_counts)
+
+        if max_cols == 1:
+            title_html = f'<div class="p-3 font-editorial font-bold text-stone-200 uppercase tracking-wider bg-[#1B1B1B] border-b border-[#2D2D2D]">{title}</div>' if title else ''
+            items_html = []
+            for r in rows:
+                val = r[0].strip(' -*•')
+                if val:
+                    items_html.append(f'<div class="py-2.5 px-4 border-b border-[#262626] last:border-b-0 flex items-start gap-2.5"><span class="text-[#E50914] font-bold mt-0.5">&bull;</span><span class="text-stone-300 text-xs sm:text-sm font-sans-body">{val}</span></div>')
+            return f'{lead_html}<div class="my-6 border border-[#2D2D2D] rounded-xs bg-[#161616] overflow-hidden">{title_html}<div class="divide-y divide-[#222222]">{" ".join(items_html)}</div></div>'
+
+        header_row = rows[0]
+        data_rows = rows[1:]
+
+        caption_html = f'<caption class="p-3 text-left font-editorial font-bold text-stone-200 uppercase tracking-wider bg-[#1B1B1B] border-b border-[#2D2D2D]">{title}</caption>' if title else ''
+        th_cells = ''.join([f'<th class="py-2.5 px-4 font-semibold uppercase tracking-wider border-r border-[#262626] last:border-r-0">{c}</th>' for c in header_row])
+        thead_html = f'<thead class="bg-[#1F1F1F] text-[#E50914] font-bold border-b border-[#2D2D2D]"><tr>{th_cells}</tr></thead>'
+
+        tr_list = []
+        for row in data_rows:
+            while len(row) < max_cols:
+                row.append('')
+            td_cells = ''.join([f'<td class="py-2.5 px-4 border-r border-[#222222] last:border-r-0">{c}</td>' for c in row])
+            tr_list.append(f'<tr class="hover:bg-[#1E1E1E]/60 transition-colors odd:bg-[#161616] even:bg-[#191919]">{td_cells}</tr>')
+        tbody_html = f'<tbody class="divide-y divide-[#262626] text-stone-300 font-mono-meta text-xs sm:text-sm">{"".join(tr_list)}</tbody>'
+
+        return f'{lead_html}<div class="my-6 overflow-x-auto border border-[#2D2D2D] rounded-xs bg-[#161616] shadow-md"><table class="w-full text-left font-mono-meta text-xs sm:text-sm border-collapse">{caption_html}{thead_html}{tbody_html}</table></div>'
+
+    h = p_pattern.sub(replace_table_block, h)
+
+    # 6. Spacing fixes after punctuation
+    h = re.sub(r'([a-z0-9])\.([A-Z])', r'\1. \2', h)
+    h = re.sub(r'([a-zA-Z0-9]),([a-zA-Z])', r'\1, \2', h)
+    h = re.sub(r'([a-zA-Z0-9]):([A-Z])', r'\1: \2', h)
+    h = re.sub(r'([a-zA-Z0-9]);([a-zA-Z])', r'\1; \2', h)
+
+    # 7. Clean up redundant empty tags and residual paragraph wrappers
+    h = re.sub(r'<p>\s*<\/p>', '', h)
+    h = re.sub(r'<p>\s*(<(?:figure|div|table|h[1-6]|ul|ol|pre)\b)', r'\1', h)
+    h = re.sub(r'(<\/(?:figure|div|table|h[1-6]|ul|ol|pre)>)\s*<\/p>', r'\1', h)
+
+    return h.strip()
+
+
 def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline: str) -> dict:
     """
     Transforms Gemini broadsheet output into structured broadsheet HTML
@@ -1590,7 +1796,7 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
                     sections_html.append(p_group)
                 current_paras = []
             h_text = h_match.group(1).strip()
-            current_heading = re.sub(r'^(?:Section\s+Heading|Chapter\s+\d+|Section\s+\d+|Part\s+\d+|Heading):\s*', '', h_text, flags=re.IGNORECASE).strip()
+            current_heading = re.sub(r'^(?:#{1,4}\s*|(?:Section\s+Heading|Chapter\s+\d+|Section\s+\d+|Part\s+\d+|Heading):\s*)+', '', h_text, flags=re.IGNORECASE).strip()
             continue
 
         q_match = re.match(r'^>\s*(.+)', l)
@@ -1613,9 +1819,18 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
 
             # Only show speaker if it's a real name or institution
             spk_clean = spk if spk and not any(k in spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']) else ""
-            footer_html = f'<footer class="text-xs font-mono-meta text-stone-400 not-italic mt-2">&mdash; {spk_clean}</footer>' if spk_clean else ''
-            
-            current_paras.append(f'</blockquote><blockquote class="my-6 border-l-4 border-[#E50914] pl-4 italic text-stone-100 font-editorial text-lg leading-relaxed">&ldquo;{q_clean}&rdquo;{footer_html}</blockquote><p>')
+            fig_cap = f'<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{spk_clean}</span></figcaption>' if spk_clean else ''
+
+            if current_paras:
+                p_group = "".join([f"<p>{p}</p>" for p in current_paras])
+                if current_heading:
+                    sections_html.append(f"<h3>{current_heading}</h3>{p_group}")
+                    current_heading = None
+                else:
+                    sections_html.append(p_group)
+                current_paras = []
+
+            sections_html.append(f'<figure class="my-8 py-5 px-6 border-l-4 border-[#E50914] bg-[#161616]/80 rounded-r-xs shadow-md"><blockquote class="font-editorial italic text-stone-100 text-lg sm:text-xl leading-relaxed">&ldquo;{q_clean}&rdquo;</blockquote>{fig_cap}</figure>')
             continue
 
         clean_p = re.sub(r'[*_]{2,}', '', l).strip()
@@ -1671,9 +1886,8 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
   </ul>
 </div>"""
 
-    final_html = f"{lead_p1}\n{summary_html}\n{body_after_lead}"
-    final_html = final_html.replace("<p></p>", "")
-    final_html = final_html.replace("</blockquote><p></p>", "</blockquote>")
+    raw_assembled = f"{lead_p1}\n{summary_html}\n{body_after_lead}"
+    final_html = clean_and_format_article_html(raw_assembled)
 
     soup = BeautifulSoup(final_html, 'html.parser')
     word_count = len(soup.get_text().split())
@@ -1981,44 +2195,69 @@ def run_pipeline(
     total_discovered = sum(len(v) for v in discovered_by_feed.values())
     logger.info(f"Discovered {total_discovered} raw wire dispatches across {len(discovered_by_feed)} active feeds.")
 
-    # 4. Multi-Sector Round-Robin Interleaving with Freshness Priority
-    interleaved_items = []
-    feed_lists = list(discovered_by_feed.values())
-    max_len = max([len(lst) for lst in feed_lists]) if feed_lists else 0
-    for idx in range(max_len):
-        for lst in feed_lists:
-            if idx < len(lst):
-                interleaved_items.append(lst[idx])
+    # 4. Multi-Sector Categorical Grouping and Equitable Round-Robin
+    # Group discovered items by category
+    items_by_cat = defaultdict(list)
+    for feed_id, items in discovered_by_feed.items():
+        for item in items:
+            cat = (item.get('default_category') or 'WORLD').upper()
+            items_by_cat[cat].append(item)
 
-    # Sort all candidate wire items by publish freshness (most recent first)
-    interleaved_items.sort(
-        key=lambda x: x.get('pub_dt') or datetime.min.replace(tzinfo=timezone.utc),
-        reverse=True
-    )
+    # Sort items within each category by publish freshness
+    for cat in items_by_cat:
+        items_by_cat[cat].sort(
+            key=lambda x: x.get('pub_dt') or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True
+        )
 
-    # 5. Multi-Layered Anti-Duplicate Filtering
+    # Count recent articles per category in existing_corpus to prioritize starved sectors
+    cat_corpus_counts = Counter([doc.get('category_id', 'UNKNOWN').upper() for doc in existing_corpus])
+    all_categories = [
+        'SCIENCE', 'EDUCATION', 'LIFESTYLE', 'FASHION', 'TECHNOLOGY',
+        'FINANCE', 'SPORT', 'CELEBRITY', 'POLITICS', 'WORLD', 'NIGERIA'
+    ]
+    # Sort categories so sectors with the fewest articles come first
+    sorted_categories = sorted(all_categories, key=lambda c: cat_corpus_counts.get(c, 0))
+
+    # 5. Multi-Layered Anti-Duplicate Filtering with Fair Category Distribution
     unique_candidates = []
     seen_in_batch = []
     duplicate_count = 0
+    cat_ptrs = {c: 0 for c in sorted_categories}
 
-    for item in interleaved_items:
-        is_dup, reason = is_duplicate_story(item, existing_corpus, seen_in_batch, ledger)
-        if is_dup:
-            duplicate_count += 1
-            continue
+    # Round-robin selection: guarantees every category gets fair representation in each batch
+    round_num = 0
+    while len(unique_candidates) < batch_size and round_num < 12:
+        added_in_round = 0
+        for cat in sorted_categories:
+            if len(unique_candidates) >= batch_size:
+                break
+            cat_list = items_by_cat.get(cat, [])
+            ptr = cat_ptrs[cat]
+            while ptr < len(cat_list):
+                cand = cat_list[ptr]
+                ptr += 1
+                cat_ptrs[cat] = ptr
 
-        cand_title = item.get('title', '').strip()
-        seen_in_batch.append({
-            'title': cand_title,
-            'title_norm': cand_title.lower(),
-            'slug': clean_slug(cand_title),
-            'category_id': item.get('default_category', ''),
-            'source_url': item.get('link', '').strip(),
-            'tokens': extract_story_tokens(cand_title, item.get('summary', ''))
-        })
-        unique_candidates.append(item)
+                is_dup, reason = is_duplicate_story(cand, existing_corpus, seen_in_batch, ledger)
+                if is_dup:
+                    duplicate_count += 1
+                    continue
 
-        if len(unique_candidates) >= batch_size:
+                cand_title = cand.get('title', '').strip()
+                seen_in_batch.append({
+                    'title': cand_title,
+                    'title_norm': cand_title.lower(),
+                    'slug': clean_slug(cand_title),
+                    'category_id': cand.get('default_category', ''),
+                    'source_url': cand.get('link', '').strip(),
+                    'tokens': extract_story_tokens(cand_title, cand.get('summary', ''))
+                })
+                unique_candidates.append(cand)
+                added_in_round += 1
+                break  # Give next category a turn
+        round_num += 1
+        if added_in_round == 0:
             break
 
     logger.info(f"Deduplication summary: Filtered out {duplicate_count} duplicate stories. New unique breaking candidates: {len(unique_candidates)} (capped at {batch_size}).")

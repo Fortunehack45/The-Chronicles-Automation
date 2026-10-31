@@ -111,8 +111,68 @@ GEOPOLITICAL_DATELINES: Dict[str, str] = {
     'geneva': 'GENEVA', 'brussels': 'BRUSSELS', 'paris': 'PARIS', 'berlin': 'BERLIN', 'frankfurt': 'FRANKFURT',
     'beijing': 'BEIJING', 'tokyo': 'TOKYO', 'doha': 'DOHA', 'cairo': 'CAIRO', 'nairobi': 'NAIROBI',
     'johannesburg': 'JOHANNESBURG', 'pretoria': 'PRETORIA', 'cape town': 'CAPE TOWN',
-    'cape canaveral': 'CAPE CANAVERAL', 'houston': 'HOUSTON', 'san francisco': 'SAN FRANCISCO'
+    'cape canaveral': 'CAPE CANAVERAL', 'houston': 'HOUSTON', 'san francisco': 'SAN FRANCISCO',
+    'los angeles': 'LOS ANGELES', 'hollywood': 'LOS ANGELES', 'vatican': 'VATICAN CITY', 'rome': 'ROME'
 }
+
+def determine_author_desk(category: str, dateline: str, feed_region: str = "") -> str:
+    """
+    Intelligently assigns broadsheet desk based on subject beat and authentic reporting dateline.
+    Guarantees that a New York, London, or sports report is NEVER assigned to Nigeria Desk.
+    Always conforms strictly to the Supabase policy 'Chronicles % Desk'.
+    """
+    dateline_upper = (dateline or '').upper()
+    cat_upper = (category or '').upper()
+
+    if dateline_upper in ['NEW YORK', 'MANHATTAN']:
+        if cat_upper == 'FINANCE':
+            return 'Chronicles Financial Intelligence Desk'
+        if cat_upper == 'FASHION':
+            return 'Chronicles Style & Culture Desk'
+        return 'Chronicles New York Desk'
+    if dateline_upper in ['WASHINGTON']:
+        return 'Chronicles Washington Desk'
+    if dateline_upper in ['LONDON']:
+        if cat_upper in ['CELEBRITY', 'LIFESTYLE']:
+            return 'Chronicles Arts & Entertainment Desk'
+        return 'Chronicles London Desk'
+    if dateline_upper in ['VATICAN CITY', 'ROME']:
+        return 'Chronicles Vatican Desk'
+    if dateline_upper in ['LOS ANGELES', 'HOLLYWOOD']:
+        if cat_upper == 'CELEBRITY':
+            return 'Chronicles Arts & Entertainment Desk'
+        return 'Chronicles Los Angeles Desk'
+    if dateline_upper in ['SAN FRANCISCO', 'SILICON VALLEY']:
+        return 'Chronicles Technology & AI Desk'
+
+    if cat_upper == 'SPORT':
+        return 'Chronicles Sports Desk'
+    if cat_upper == 'FASHION':
+        return 'Chronicles Style & Culture Desk'
+    if cat_upper == 'FINANCE':
+        return 'Chronicles Financial Intelligence Desk'
+    if cat_upper == 'TECHNOLOGY':
+        return 'Chronicles Technology & AI Desk'
+    if cat_upper == 'CELEBRITY':
+        return 'Chronicles Arts & Entertainment Desk'
+    if cat_upper == 'SCIENCE':
+        return 'Chronicles Science & Health Desk'
+    if cat_upper == 'EDUCATION':
+        return 'Chronicles Education & Policy Desk'
+    if cat_upper == 'LIFESTYLE':
+        return 'Chronicles Lifestyle Desk'
+    if cat_upper == 'WORLD':
+        return 'Chronicles Diplomatic Desk'
+    if cat_upper == 'POLITICS':
+        if feed_region == 'nigeria' or dateline_upper in ['ABUJA', 'LAGOS']:
+            return 'Chronicles Abuja Desk'
+        return 'Chronicles Washington Desk'
+    if cat_upper == 'NIGERIA':
+        if dateline_upper == 'LAGOS':
+            return 'Chronicles Lagos Desk'
+        return 'Chronicles Nigeria Desk'
+
+    return f"Chronicles {category.title()} Desk"
 
 # Verified Feed Registry across All 8 Sectors
 VERIFIED_FEEDS = [
@@ -355,22 +415,22 @@ VERIFIED_FEEDS = [
 # Sector-specific broadsheet contextual narratives
 BEAT_SECTOR_CONTEXT = {
     'NIGERIA': {
-        'sec1_title': 'Federal-State Dynamics & Sub-National Governance',
-        'sec2_title': 'Legislative Review, Statutory Mandates & Regulatory Compliance',
-        'sec3_title': 'Judicial Precedents & Constitutional Repercussions',
-        'sec4_title': 'Socio-Economic Ramifications & Public Infrastructure',
-        'sec5_title': 'Policy Trajectory & Forthcoming National Milestones',
+        'sec1_title': 'Strategic Overview & Operational Trajectory',
+        'sec2_title': 'Institutional Review & Stakeholder Engagement',
+        'sec3_title': 'Community Impact & Civic Welfare',
+        'sec4_title': 'Socio-Economic Ramifications & Regional Development',
+        'sec5_title': 'Forward Outlook & Implementation Milestones',
         'deep_paragraphs': [
-            "The operational trajectory of this national development highlights the intricate coordination required across Nigeria's federal ministries, departments, and sub-national state administrations. Statutory regulatory bodies and parliamentary oversight panels have initiated comprehensive procedural assessments to verify that operational directives align with the 1999 Constitution as amended and prevailing public procurement statutes.",
-            "Sub-national governance analysts observe that executing structural policies of this scope requires seamless synergy between the federal executive council and state governments across all six geopolitical zones. Preserving administrative transparency and procedural adherence remains vital to preventing inter-governmental friction and delivering sustainable public value.",
-            "Parliamentary committees and statutory accountability bodies have signaled their intention to examine procedural adherence through formal oversight hearings. Lawmakers across party lines emphasize that while administrative agility is necessary to address emergent national challenges, legislative scrutiny ensures that public resources and executive prerogatives remain aligned with the public trust.",
-            "Civil society coalitions, governance watchdogs, and regional development monitors have mobilized field observers across multiple states to conduct independent audits. Their primary objective is to verify that administrative directives translate into measurable public value, particularly in communities where past governance interventions suffered from implementation delays.",
-            "Regional political observers in administrative hubs point out that the political economy surrounding these measures carries significant implications for upcoming electoral cycles and inter-governmental alliances. As state governors and federal ministers coordinate operational strategies, public demand for verifiable milestones and transparent communication has reached unprecedented levels.",
-            "Public administration experts argue that sustainable reform requires deep institutional capacity building within line ministries, parastatals, and grassroots execution agencies. Without continuous civil service training and automated workflow monitoring, even the most ambitiously conceived executive programs risk bureaucratic bottlenecks at the point of citizen delivery.",
-            "Inter-governmental fiscal relations also face structural realignments under this policy trajectory, as revenue allocation formulas and matching grant provisions require harmonized accounting across federal and sub-national treasuries. Finance commissioners and budget directors have highlighted the necessity of unified data dashboards to track resource flows in real time.",
-            "Legal advocates and constitutional watchdogs have prepared detailed advisory memoranda concerning the statutory limits of administrative discretion in implementing these directives. They contend that transparent reporting to the auditor general and timely publication of disbursement ledgers constitute non-negotiable legal imperatives.",
-            "Sociological researchers and grassroots community organizers underscore that policy success is fundamentally defined by tangible improvements in human security and civic welfare. Community consultative forums are being convened across senatorial districts to provide citizen feedback mechanisms directly to central decision-makers.",
-            "Looking toward forthcoming statutory deadlines, judicial authorities and administrative tribunals are preparing advisory briefs on relevant statutory interpretations. These procedural determinations will establish legal baselines for administrative action, defining how similar policy questions are resolved across state and federal jurisdictions in the years ahead."
+            "The operational trajectory of this development highlights the sustained efforts of institutional stakeholders and regional leadership to advance public interest benchmarks across key sectors.",
+            "Independent analysts and observers note that executing initiatives of this magnitude requires transparent coordination, robust accountability, and active engagement with grassroots communities.",
+            "Civil society coalitions and regional development monitors have welcomed the initiative, highlighting the importance of verifiable milestones and transparent communication.",
+            "Community leaders and civic stakeholders point out that sustainable progress is fundamentally measured by tangible improvements in public welfare, service delivery, and economic opportunity.",
+            "Public policy experts emphasize that continuous capacity building and institutional diligence remain essential to ensuring long-term project viability.",
+            "Regional development planners have underscored the necessity of integrated monitoring to ensure resources are utilized effectively and deliver maximum community impact.",
+            "Advocacy groups and independent observers maintain that transparent reporting and timely stakeholder updates constitute essential pillars of responsible administration.",
+            "Local economic monitors indicate that community-level initiatives create valuable multiplier effects, supporting regional livelihoods and commercial vitality.",
+            "Consultative forums and civic feedback channels are being leveraged to ensure ongoing public participation and alignment with regional priorities.",
+            "Looking ahead to forthcoming project phases, sector specialists anticipate that disciplined execution and sustained oversight will establish valuable benchmarks for future initiatives."
         ]
     },
     'POLITICS': {
@@ -621,9 +681,11 @@ def sanitize_paragraph_quotes(text: str) -> str:
 def classify_article_beat(title: str, text: str, fallback_cat: str = "") -> str:
     """
     Intelligently classifies news dispatches across all 11 broadsheet beats.
-    Inspects headline syntax first, then semantic body context, without hardcoded fallback bias.
+    Inspects headline syntax first, geographic and topical signals, and respects feed fallback.
+    Never defaults to 'NIGERIA' if the subject or geography is foreign or belongs to a topical beat.
     """
     title_lower = title.lower()
+    combined_sample = f"{title} {text[:800]}".lower()
 
     # 1. SPORT
     sport_patterns = [
@@ -633,7 +695,8 @@ def classify_article_beat(title: str, text: str, fallback_cat: str = "") -> str:
         r'\bmedals?\b', r'\bolympics?\b', r'\bballon d[’\']?or\b', r'\bpoints as\b', r'\bpelicans\b',
         r'\bleague\b', r'\bmatch\b', r'\bworld cup\b', r'\bsüper lig\b', r'\bsuper lig\b',
         r'\bosimhen\b', r'\bmbappe\b', r'\bkane\b', r'\bogbu\b', r'\bgalatasaray\b', r'\bachiuwa\b',
-        r'\bvilla to sue carragher\b', r'\bcarragher\b', r'\bnba\b', r'\bkings fall\b'
+        r'\bvilla to sue carragher\b', r'\bcarragher\b', r'\bnba\b', r'\bkings fall\b',
+        r'\bj200\b', r'\bcairo event\b', r'\btagbo\b', r'\bogunsakin\b', r'\bnnl\b', r'\blocker room\b'
     ]
     if any(re.search(p, title_lower) for p in sport_patterns):
         return 'SPORT'
@@ -649,49 +712,54 @@ def classify_article_beat(title: str, text: str, fallback_cat: str = "") -> str:
         r'\bstock investors\b', r'\btax debt\b', r'\btax reforms?\b', r'\bborrowing, says debt\b',
         r'\beconomic growth\b', r'\bcommercial bank\b', r'\binterest rate\b', r'\bcbn\b',
         r'\bcentral bank\b', r'\bmonetary policy\b', r'\bsovereign debt\b', r'\bfinancial planning\b',
-        r'\bn450 billion\b', r'\bn4\.6trn\b', r'\bbua foods\b', r'\bcorporate earnings\b'
+        r'\bn450 billion\b', r'\bn4\.6trn\b', r'\bbua foods\b', r'\bcorporate earnings\b',
+        r'\bpolymarket\b', r'\bjulius berger.*unit loses\b', r'\bloses n\d+'
     ]
     if any(re.search(p, title_lower) for p in finance_patterns):
         return 'FINANCE'
 
-    # 3. CELEBRITY & ENTERTAINMENT
-    celeb_patterns = [
-        r'\bmovie\b', r'\bfilm\b', r'\bactor\b', r'\bactress\b', r'\bhollywood\b',
-        r'\bnollywood\b', r'\bgrammy\b', r'\boscar\b', r'\bscorsese\b', r'\bangelina jolie\b',
-        r'\bpop star\b', r'\bafrobeats?\b', r'\bwizkid\b', r'\bdavido\b', r'\bburna boy\b',
-        r'\bcelebrity traitors\b', r'\brussell brand\b', r'\btraitors comes\b', r'\bcleopatra\b'
-    ]
-    if any(re.search(p, title_lower) for p in celeb_patterns):
-        return 'CELEBRITY'
-
-    # 4. FASHION
+    # 3. FASHION
     fashion_patterns = [
         r'\bfashion week\b', r'\brunway\b', r'\bhaute couture\b', r'\bdesigner\b',
         r'\bwardrobe\b', r'\bcouture\b', r'\bapparel\b', r'\bluxury fashion\b', r'\bvogue\b',
         r'\bdries van noten\b', r'\bparadiso chic\b', r'\bchristie brown\b', r'\bchic ni city\b',
-        r'\bcuts 195 jobs, dries\b'
+        r'\bcuts 195 jobs, dries\b', r'\buniqlo\b', r'\bhaus labs\b', r'\bbalenciaga\b',
+        r'\bpr is hiring\b', r'\bvip manager\b', r'\bmartine rose\b', r'\beckhaus latta\b',
+        r'\bmended clothes\b', r'\bflagship\b', r'\blookbook\b', r'\bcate blanchett-backed\b'
     ]
     if any(re.search(p, title_lower) for p in fashion_patterns):
         return 'FASHION'
 
-    # 5. TECHNOLOGY
+    # 4. CELEBRITY & ENTERTAINMENT
+    celeb_patterns = [
+        r'\bmovie\b', r'\bfilm\b', r'\bactor\b', r'\bactress\b', r'\bhollywood\b',
+        r'\bnollywood\b', r'\bgrammy\b', r'\boscar\b', r'\bscorsese\b', r'\bangelina jolie\b',
+        r'\bpop star\b', r'\bafrobeats?\b', r'\bwizkid\b', r'\bdavido\b', r'\bburna boy\b',
+        r'\bcelebrity traitors\b', r'\brussell brand\b', r'\btraitors comes\b', r'\bcleopatra\b',
+        r'\bpatrick stewart\b', r'\bmckellen\b', r'\blady gaga\b'
+    ]
+    if any(re.search(p, title_lower) for p in celeb_patterns):
+        return 'CELEBRITY'
+
+    # 5. EDUCATION
+    education_patterns = [
+        r'\bcolleges? closed\b', r'\bcolleges? are creating\b', r'\buniversity\b', r'\basuu\b',
+        r'\bstudents?\b', r'\bjamb\b', r'\bwaec\b', r'\blecturers?\b', r'\bcampus\b',
+        r'\bpolytechnic\b', r'\bscholarships?\b', r'\btertiary\b', r'\bschools?\b', r'\badmissions?\b'
+    ]
+    if any(re.search(p, title_lower) for p in education_patterns):
+        return 'EDUCATION'
+
+    # 6. TECHNOLOGY
     tech_patterns = [
         r'\bai\b', r'\bartificial intelligence\b', r'\bai search\b', r'\bai spending\b',
         r'\btech stocks\b', r'\bgoogle value\b', r'\bcyberattack\b', r'\bsemiconductor\b',
         r'\bchipmakers?\b', r'\bsoftware\b', r'\bstartup\b', r'\bcloud\b', r'\bcybersecurity\b',
-        r'\balgorithm\b', r'\bsmartphone\b', r'\bapple\b', r'\bmicrosoft\b', r'\bmeta\b'
+        r'\balgorithm\b', r'\bsmartphone\b', r'\bapple\b', r'\bmicrosoft\b', r'\bmeta\b',
+        r'\bvideo game\b', r'\bremakes tap\b'
     ]
     if any(re.search(p, title_lower) for p in tech_patterns):
         return 'TECHNOLOGY'
-
-    # 6. EDUCATION
-    education_patterns = [
-        r'\bcolleges? closed\b', r'\buniversity\b', r'\basuu\b', r'\bstudents?\b',
-        r'\bjamb\b', r'\bwaec\b', r'\blecturers?\b', r'\bcampus\b', r'\bpolytechnic\b',
-        r'\bscholarships?\b', r'\btertiary\b', r'\bschools?\b', r'\badmissions?\b'
-    ]
-    if any(re.search(p, title_lower) for p in education_patterns):
-        return 'EDUCATION'
 
     # 7. SCIENCE
     science_patterns = [
@@ -706,7 +774,8 @@ def classify_article_beat(title: str, text: str, fallback_cat: str = "") -> str:
     lifestyle_patterns = [
         r'\bwellness\b', r'\bhealthy eating\b', r'\bdiet\b', r'\bmental health\b',
         r'\bculinary\b', r'\bhospitality\b', r'\binterior design\b', r'\bdecor\b',
-        r'\brelationship\b', r'\bfitness\b', r'\bworkout\b', r'\bleisure\b'
+        r'\brelationship\b', r'\bfitness\b', r'\bworkout\b', r'\bleisure\b',
+        r'\bivf\b', r'\bpregnancy\b'
     ]
     if any(re.search(p, title_lower) for p in lifestyle_patterns):
         return 'LIFESTYLE'
@@ -717,33 +786,45 @@ def classify_article_beat(title: str, text: str, fallback_cat: str = "") -> str:
         r'\bminister\b', r'\blawmakers?\b', r'\bapc\b', r'\bpdp\b', r'\badc\b',
         r'\bel-rufai\b', r'\bel-sayed\b', r'\bdetention\b', r'\bprotests\b',
         r'\bobamacare\b', r'\bcash payment to vulnerable\b', r'\bpolitical\b',
-        r'\bparliament\b', r'\bcongress\b', r'\bwhite house\b', r'\bexecutive council\b'
+        r'\bparliament\b', r'\bcongress\b', r'\bwhite house\b', r'\bexecutive council\b',
+        r'\bkathy hochul\b', r'\bchrista pike\b', r'\bmidterms?\b', r'\bvoting surges\b',
+        r'\btrump\b', r'\bcalifornia ballots\b', r'\bethics inquiry into\b'
     ]
     if any(re.search(p, title_lower) for p in politics_patterns):
         return 'POLITICS'
 
-    # 10. WORLD (Foreign diplomacy, conflicts, international incidents)
+    # 10. WORLD
     world_patterns = [
         r'\bus approves sale\b', r'\bpatriot missiles\b', r'\bukraine\b', r'\brussia\b',
-        r'\bhelicopter crashes in northern indian state\b', r'\bu\.s\. to send dozens\b',
-        r'\bafghanistan\b', r'\bgermany and france brace\b', r'\bgermany, nigeria explore\b',
-        r'\baviation agreement\b', r'\bdw\b', r'\bforeign ministry\b'
+        r'\bhelicopter crashes\b', r'\bu\.s\. to send dozens\b', r'\bafghanistan\b',
+        r'\bgermany and france brace\b', r'\bgermany, nigeria explore\b', r'\baviation agreement\b',
+        r'\bdw\b', r'\bforeign ministry\b', r'\bspying\b', r'\bchinese nationals\b', r'\bpontiff\b',
+        r'\bice arrest\b', r'\bnetanyahu\b'
     ]
     if any(re.search(p, title_lower) for p in world_patterns):
         return 'WORLD'
 
-    # 11. Multi-token scoring fallback across full text
-    combined = f"{title} {title} {title} {text[:3000]}".lower()
+    # 11. Geographic / Contextual Deductions:
+    # If explicitly in US, UK, Europe, Middle East, Asia -> NEVER NIGERIA
+    is_foreign_geo = any(re.search(rf'\b{w}\b', combined_sample) for w in [
+        'new york', 'nyc', 'manhattan', 'washington', 'california', 'los angeles', 'texas',
+        'london', 'uk', 'britain', 'paris', 'france', 'berlin', 'germany', 'cairo', 'egypt',
+        'china', 'chinese', 'russia', 'moscow', 'ukraine', 'israel', 'gaza', 'afghanistan',
+        'athens', 'greece', 'vatican', 'rome', 'india'
+    ])
+    
+    # 12. Multi-token scoring across full text
+    combined = f"{title} {title} {text[:3000]}".lower()
     scores = {
-        'NIGERIA': len(re.findall(r'\b(nigeria|nigerian|zamfara|lagos|abuja|kano|rivers|ogun|borno|enugu|kaduna|ibadan|delta|edo|fct|fubara|wike|tinubu|shettima|efcc|cbn|nass|invec|nairametrics|lawal|akpabio|sanwo-olu|sub-national|senatorial|state government|federal government)\b', combined)),
-        'POLITICS': len(re.findall(r'\b(senate|minister|governor|assembly|election|court|party|lawmaker|tribunal|judiciary|apc|pdp|bill|cabinet|impeachment|congress|parliament|vote|ballot|detention|politicians)\b', combined)),
-        'FINANCE': len(re.findall(r'\b(naira|dollar|cbn|inflation|bank|stock|ipo|revenue|investment|budget|dividend|gdp|debt|earnings|shares|interest rate|market capitalisation|liquidity|treasury|bond|monetary|equities|ngx|wall street|crude oil|bua)\b', combined)),
-        'TECHNOLOGY': len(re.findall(r'\b(ai|artificial intelligence|software|app|cyber|semiconductor|chip|google|apple|microsoft|meta|startup|digital payments|fintech|algorithm|smartphone|gadget|opay|crypto|bitcoin|ethereum|hardware|cybersecurity)\b', combined)),
-        'SCIENCE': len(re.findall(r'\b(nasa|space|telescope|orbit|climate|species|biology|physics|medicine|vaccine|laboratory|satellite|astronomy|niprd|solar|cosmic|lunar|mars|researchers|genetics|dna|environment|pharmaceutical)\b', combined)),
-        'SPORT': len(re.findall(r'\b(super eagles|afcon|fifa|football|striker|arsenal|chelsea|manchester|coach|transfer|tournament|olympics|league|winger|defender|ogbu|osimhen|lookman|champions league|premier league|goal|match|cup|ballon|squad)\b', combined)),
-        'EDUCATION': len(re.findall(r'\b(university|asuu|student|students|jamb|waec|lecturer|campus|polytechnic|curriculum|scholarship|matriculation|convocation|tertiary|examinations|schools|admissions|academic|faculty|unilag|ui|oau|ahmadu bello)\b', combined)),
-        'LIFESTYLE': len(re.findall(r'\b(wellness|nutrition|travel|culinary|mental health|hospitality|architecture|leisure|interior design|relationship|gastronomy|lifestyle|decor|fitness)\b', combined)),
-        'FASHION': len(re.findall(r'\b(fashion|runway|haute couture|designer|wardrobe|collection|styling|fashion week|apparel|aesthetics|luxury fashion|textile|vogue|model|tailoring|couture|garment)\b', combined)),
+        'NIGERIA': 0 if is_foreign_geo else len(re.findall(r'\b(nigeria|nigerian|zamfara|lagos|abuja|kano|rivers|ogun|borno|enugu|kaduna|ibadan|delta|edo|fct|fubara|wike|tinubu|shettima|efcc|cbn|nass|lawal|akpabio|sanwo-olu)\b', combined)),
+        'POLITICS': len(re.findall(r'\b(senate|minister|governor|assembly|election|court|party|lawmaker|tribunal|judiciary|apc|pdp|bill|cabinet|congress|parliament|vote|ballot|detention|politicians|hochul)\b', combined)),
+        'FINANCE': len(re.findall(r'\b(naira|dollar|cbn|inflation|bank|stock|ipo|revenue|investment|budget|dividend|gdp|debt|earnings|shares|interest rate|market capitalisation|liquidity|treasury|bond|monetary|equities|ngx|wall street|crude oil)\b', combined)),
+        'TECHNOLOGY': len(re.findall(r'\b(ai|artificial intelligence|software|app|cyber|semiconductor|chip|google|apple|microsoft|meta|startup|digital payments|fintech|algorithm|smartphone|gadget|opay|crypto|bitcoin)\b', combined)),
+        'SCIENCE': len(re.findall(r'\b(nasa|space|telescope|orbit|climate|species|biology|physics|medicine|vaccine|laboratory|satellite|astronomy|niprd|solar|cosmic|lunar|mars|researchers|genetics|dna)\b', combined)),
+        'SPORT': len(re.findall(r'\b(super eagles|afcon|fifa|football|striker|arsenal|chelsea|manchester|coach|transfer|tournament|olympics|league|winger|defender|ogbu|osimhen|lookman|champions league|premier league|goal|match|cup|ballon|squad|tennis)\b', combined)),
+        'EDUCATION': len(re.findall(r'\b(university|asuu|student|students|jamb|waec|lecturer|campus|polytechnic|curriculum|scholarship|matriculation|convocation|tertiary|examinations|schools|admissions|academic|faculty)\b', combined)),
+        'LIFESTYLE': len(re.findall(r'\b(wellness|nutrition|travel|culinary|mental health|hospitality|architecture|leisure|interior design|relationship|gastronomy|lifestyle|decor|fitness|ivf)\b', combined)),
+        'FASHION': len(re.findall(r'\b(fashion|runway|haute couture|designer|wardrobe|collection|styling|fashion week|apparel|aesthetics|luxury fashion|textile|vogue|model|tailoring|couture|garment|boutique)\b', combined)),
         'CELEBRITY': len(re.findall(r'\b(nollywood|hollywood|grammy|oscar|music video|afrobeat|wizkid|davido|burna boy|asake|tiwa|album|pop star|entertainment|red carpet|premiere|box office|actor|actress|celebrity|cinema)\b', combined)),
         'WORLD': len(re.findall(r'\b(diplomacy|united nations|treaty|gaza|ukraine|ambassador|bilateral|summit|border|foreign ministry|peacekeeping|geopolitics|consulate|emigration|visas|russia|israel|nato|white house|downing street|kremlin|beijing)\b', combined))
     }
@@ -751,6 +832,16 @@ def classify_article_beat(title: str, text: str, fallback_cat: str = "") -> str:
     best_cat = max(scores, key=scores.get)
     if scores[best_cat] >= 2:
         return best_cat
+
+    # If fallback_cat is valid and non-empty, prioritize it
+    valid_beats = {'NIGERIA', 'WORLD', 'POLITICS', 'FINANCE', 'TECHNOLOGY', 'SCIENCE', 'LIFESTYLE', 'FASHION', 'CELEBRITY', 'SPORT', 'EDUCATION'}
+    if fallback_cat and fallback_cat.upper() in valid_beats:
+        if is_foreign_geo and fallback_cat.upper() == 'NIGERIA':
+            return 'WORLD'
+        return fallback_cat.upper()
+
+    if is_foreign_geo:
+        return 'WORLD'
 
     return 'NIGERIA'
 
@@ -1444,14 +1535,14 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
   </ul>
 </div>"""
 
-    # 3. Section 1: Chronology of State Actions & Administrative Findings
+    # 3. Section 1
     sec1_paras = []
     p_idx = 3
     while p_idx < len(raw_paras) and len(sec1_paras) < 3:
         sec1_paras.append(f"<p>{raw_paras[p_idx]}</p>")
         p_idx += 1
-    sec1_paras.append(f"<p>{dp(0)}</p>")
-    sec1_paras.append(f"<p>{dp(1)}</p>")
+    if len(sec1_paras) < 2:
+        sec1_paras.append(f"<p>{dp(0)}</p>")
     sec1_html = f"<h3>{beat_data['sec1_title']}</h3>{''.join(sec1_paras)}"
 
     # 4. Luxury Pull-Quote Callout (Clean single typographical quotes, zero double marks)
@@ -1469,41 +1560,40 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
   {f'<footer class="text-xs font-mono-meta text-stone-400 not-italic mt-2">&mdash; {clean_spk}</footer>' if clean_spk else ''}
 </blockquote>"""
 
-    # 5. Section 2: Legislative Scrutiny & Executive Mandate Dynamics
+    # 5. Section 2
     sec2_paras = []
     while p_idx < len(raw_paras) and len(sec2_paras) < 3:
         sec2_paras.append(f"<p>{raw_paras[p_idx]}</p>")
         p_idx += 1
-    sec2_paras.append(f"<p>{dp(2)}</p>")
-    sec2_paras.append(f"<p>{dp(3)}</p>")
+    if len(sec2_paras) < 2:
+        sec2_paras.append(f"<p>{dp(1)}</p>")
     sec2_html = f"<h3>{beat_data['sec2_title']}</h3>{''.join(sec2_paras)}"
 
-    # 6. Section 3: Institutional Checks, Federalism & Governance Repercussions
+    # 6. Section 3
     sec3_paras = []
     while p_idx < len(raw_paras) and len(sec3_paras) < 3:
         sec3_paras.append(f"<p>{raw_paras[p_idx]}</p>")
         p_idx += 1
-    sec3_paras.append(f"<p>{dp(4)}</p>")
-    sec3_paras.append(f"<p>{dp(5)}</p>")
-    sec3_paras.append(f"<p>{dp(6)}</p>")
+    if len(sec3_paras) < 2:
+        sec3_paras.append(f"<p>{dp(2)}</p>")
     sec3_html = f"<h3>{beat_data['sec3_title']}</h3>{''.join(sec3_paras)}"
 
-    # 7. Section 4: Socio-Economic Ramifications & Public Value Assessment
+    # 7. Section 4
     sec4_paras = []
     while p_idx < len(raw_paras) and len(sec4_paras) < 3:
         sec4_paras.append(f"<p>{raw_paras[p_idx]}</p>")
         p_idx += 1
-    sec4_paras.append(f"<p>{dp(7)}</p>")
-    sec4_paras.append(f"<p>{dp(8)}</p>")
-    sec4_paras.append(f"<p>{dp(9)}</p>")
+    if len(sec4_paras) < 2:
+        sec4_paras.append(f"<p>{dp(3)}</p>")
     sec4_html = f"<h3>{beat_data['sec4_title']}</h3>{''.join(sec4_paras)}"
 
-    # 8. Section 5: Judicial Precedents & Forthcoming Statutory Milestones
+    # 8. Section 5
     sec5_paras = []
     while p_idx < len(raw_paras) and len(sec5_paras) < 2:
         sec5_paras.append(f"<p>{raw_paras[p_idx]}</p>")
         p_idx += 1
-    sec5_paras.append(f"<p>{dp(10)}</p>")
+    if len(sec5_paras) < 1:
+        sec5_paras.append(f"<p>{dp(4)}</p>")
     sec5_paras.append("<p>Regulatory observers and sector analysts maintain that long-term outcomes will hinge on sustained operational vigilance and transparent statutory governance as implementation milestones advance.</p>")
     sec5_html = f"<h3>{beat_data['sec5_title']}</h3>{''.join(sec5_paras)}"
 
@@ -1588,7 +1678,7 @@ def process_single_article(
             'cover_image_url': cover_image_url,
             'content_html': editorial['content_html'],
             'status': 'published',
-            'author_name': f"Chronicles {editorial['category'].title()} Desk",
+            'author_name': determine_author_desk(editorial['category'], editorial['dateline'], item.get('region', '')),
             'read_time': editorial['read_time'],
             'views_count': 0,
             'likes_count': 0,

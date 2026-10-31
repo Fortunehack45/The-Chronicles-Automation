@@ -106,10 +106,15 @@ GEOPOLITICAL_DATELINES: Dict[str, str] = {
     'calabar': 'CALABAR', 'cross river': 'CALABAR',
     'jos': 'JOS', 'plateau state': 'JOS', 'sokoto': 'SOKOTO', 'ilorin': 'ILORIN', 'kwara': 'ILORIN',
     'london': 'LONDON', 'westminster': 'LONDON', 'downing street': 'LONDON', 'uk': 'LONDON', 'britain': 'LONDON',
+    'balmoral': 'EDINBURGH', 'scotland': 'EDINBURGH', 'edinburgh': 'EDINBURGH', 'glasgow': 'GLASGOW',
+    'spain': 'MADRID', 'madrid': 'MADRID', 'barcelona': 'BARCELONA', 'valencia': 'VALENCIA',
+    'france': 'PARIS', 'paris': 'PARIS', 'french': 'PARIS', 'macron': 'PARIS',
+    'vietnam': 'HANOI', 'hanoi': 'HANOI',
+    'china': 'BEIJING', 'beijing': 'BEIJING', 'shanghai': 'BEIJING',
     'washington': 'WASHINGTON', 'white house': 'WASHINGTON', 'capitol': 'WASHINGTON', 'pentagon': 'WASHINGTON',
     'new york': 'NEW YORK', 'wall street': 'NEW YORK', 'united nations': 'NEW YORK', 'nyse': 'NEW YORK', 'nasdaq': 'NEW YORK',
-    'geneva': 'GENEVA', 'brussels': 'BRUSSELS', 'paris': 'PARIS', 'berlin': 'BERLIN', 'frankfurt': 'FRANKFURT',
-    'beijing': 'BEIJING', 'tokyo': 'TOKYO', 'doha': 'DOHA', 'cairo': 'CAIRO', 'nairobi': 'NAIROBI',
+    'geneva': 'GENEVA', 'brussels': 'BRUSSELS', 'berlin': 'BERLIN', 'frankfurt': 'FRANKFURT',
+    'tokyo': 'TOKYO', 'doha': 'DOHA', 'cairo': 'CAIRO', 'nairobi': 'NAIROBI',
     'johannesburg': 'JOHANNESBURG', 'pretoria': 'PRETORIA', 'cape town': 'CAPE TOWN',
     'cape canaveral': 'CAPE CANAVERAL', 'houston': 'HOUSTON', 'san francisco': 'SAN FRANCISCO',
     'los angeles': 'LOS ANGELES', 'hollywood': 'LOS ANGELES', 'vatican': 'VATICAN CITY', 'rome': 'ROME'
@@ -124,6 +129,14 @@ def determine_author_desk(category: str, dateline: str, feed_region: str = "") -
     dateline_upper = (dateline or '').upper()
     cat_upper = (category or '').upper()
 
+    if dateline_upper in ['EDINBURGH', 'GLASGOW']:
+        return 'Chronicles London Desk'
+    if dateline_upper in ['MADRID', 'BARCELONA', 'VALENCIA']:
+        return 'Chronicles European Desk'
+    if dateline_upper in ['PARIS']:
+        return 'Chronicles Paris Desk'
+    if dateline_upper in ['BEIJING', 'HANOI', 'TOKYO']:
+        return 'Chronicles Asia Desk'
     if dateline_upper in ['NEW YORK', 'MANHATTAN']:
         if cat_upper == 'FINANCE':
             return 'Chronicles Financial Intelligence Desk'
@@ -1436,95 +1449,44 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
     # 5. Extract Authentic Scraped Paragraphs & Deduplicate Quote
     clean_q_test = primary_quote.strip('\'"`“” \t\r\n').lower() if primary_quote else ""
     raw_paras = []
+    seen = set()
     for p in cleaned_body_text.split('\n\n'):
         p_strip = p.strip()
         if len(p_strip) > 35 and not is_boilerplate(p_strip):
-            # Check if this paragraph duplicates the featured quote
             if clean_q_test and (clean_q_test[:35] in p_strip.lower() or p_strip.lower() in clean_q_test):
                 continue
             sanitized = sanitize_paragraph_quotes(p_strip)
-            if len(sanitized) > 30:
+            sig = sanitized[:35].lower()
+            if len(sanitized) > 30 and sig not in seen:
+                seen.add(sig)
                 raw_paras.append(sanitized)
 
-    if len(raw_paras) < 4:
+    if len(raw_paras) < 3:
         for s in re.split(r'(?<=[.!?])\s+', cleaned_body_text):
             s_strip = s.strip()
             if len(s_strip) > 30 and not is_boilerplate(s_strip):
                 if clean_q_test and (clean_q_test[:35] in s_strip.lower() or s_strip.lower() in clean_q_test):
                     continue
                 sanitized = sanitize_paragraph_quotes(s_strip)
-                if len(sanitized) > 25:
+                sig = sanitized[:35].lower()
+                if len(sanitized) > 25 and sig not in seen:
+                    seen.add(sig)
                     raw_paras.append(sanitized)
 
-    # Fetch rich beat-specific background analysis
-    beat_data = BEAT_SECTOR_CONTEXT.get(category, BEAT_SECTOR_CONTEXT['NIGERIA'])
-    deep_p = beat_data['deep_paragraphs']
-    dp = lambda i: deep_p[i % len(deep_p)]
-
     # 1. Lead Section (Opening with 2-Line Red Drop Cap directly on first narrative word)
-    lead_sentence = raw_paras[0] if raw_paras else f"Strategic institutional developments crystallized today following official ministerial disclosures and statutory evaluations."
+    lead_sentence = raw_paras[0] if raw_paras else f"Verified broadsheet dispatches from {dateline} confirm significant developments concerning this ongoing reporting cycle."
     lead_sentence = re.sub(r'^[A-Z\s]{3,25}\s*[-—]\s*', '', lead_sentence).strip()
+    lead_sentence = re.sub(r'^[“"\'‘\s]+', '', lead_sentence)
     lead_p1 = build_lead_paragraph_with_dropcap(lead_sentence)
-    lead_p2 = f"<p>{raw_paras[1]}</p>" if len(raw_paras) > 1 else f"<p>{dp(0)}</p>"
-    lead_p3 = f"<p>{raw_paras[2]}</p>" if len(raw_paras) > 2 else f"<p>{dp(1)}</p>"
 
     # 2. Executive Callout Box: Summary
-    if category == 'SPORT':
-        takeaways = [
-            f"Sporting verification and match updates confirmed from {dateline}.",
-            "Club leadership, coaching personnel, and regulatory panels reviewing match outcomes and conduct.",
-            "Independent analysts and broadcast commentators tracking competitive ramifications across league standings.",
-            "Follow-up statements and official fixtures scheduled as tournament reviews proceed."
-        ]
-    elif category == 'FINANCE':
-        takeaways = [
-            f"Financial markets and transaction metrics verified from {dateline}.",
-            "Institutional investors, asset managers, and corporate boards assessing balance sheet liquidity.",
-            "Regulatory compliance officers and exchange authorities monitoring disclosure adherence.",
-            "Updated equity indices, fiscal forecasts, and quarterly earnings notifications forthcoming."
-        ]
-    elif category == 'CELEBRITY':
-        takeaways = [
-            f"Entertainment dispatches and studio disclosures verified from {dateline}.",
-            "Industry executives, production teams, and artist representatives issuing verified statements.",
-            "Cultural critics and global audiences responding across broadcast and digital platforms.",
-            "Further release schedules and interview briefings expected in subsequent media windows."
-        ]
-    elif category == 'FASHION':
-        takeaways = [
-            f"Fashion week presentations and designer collections previewed from {dateline}.",
-            "Creative directors, atelier tailors, and luxury houses showcasing seasonal aesthetics.",
-            "Retail buyers and fashion editors reviewing textile craft and market commercialization.",
-            "Comprehensive runway reviews and editorial retrospectives scheduled for upcoming editions."
-        ]
-    elif category == 'TECHNOLOGY':
-        takeaways = [
-            f"Technology disclosures and engineering developments verified from {dateline}.",
-            "Software architects, systems engineers, and product leads monitoring deployment metrics.",
-            "Cybersecurity specialists and platform compliance teams safeguarding architectural resilience.",
-            "Next-generation feature releases and technical documentation scheduled for general availability."
-        ]
-    elif category == 'SCIENCE':
-        takeaways = [
-            f"Scientific research findings and experimental observations verified from {dateline}.",
-            "Lead investigators, laboratory researchers, and peer evaluators reviewing empirical datasets.",
-            "Academic institutions and statutory research bodies assessing reproducibility and methodological rigor.",
-            "Comprehensive research papers and symposium proceedings scheduled for scholarly presentation."
-        ]
-    elif category == 'EDUCATION':
-        takeaways = [
-            f"Academic policy updates and institutional notifications verified from {dateline}.",
-            "University councils, faculty leadership, and student unions assessing statutory implementation.",
-            "Accreditation bodies and public education watchdogs monitoring campus governance standards.",
-            "Further administrative circulars and academic calendar revisions forthcoming."
-        ]
-    else:
-        takeaways = [
-            f"Authoritative broadsheet verification confirmed from {dateline}.",
-            "Administrative authorities, field observers, and oversight panels tracking operational progress.",
-            "Civil society coalitions and governance watchdogs monitoring public interest benchmarks.",
-            "Follow-up technical briefs and statutory disclosures scheduled as assessments conclude."
-        ]
+    clean_t = re.sub(r'^(?:BREAKING|EXCLUSIVE|REPORT):\s*', '', title, flags=re.IGNORECASE).strip()
+    takeaways = [
+        f"Verified broadsheet reporting filed from {dateline} under strict editorial standards.",
+        f"Official briefings confirm operational details regarding {clean_t}.",
+        f"Institutional observers and regulatory oversight bodies tracking subsequent disclosures.",
+        f"Corroborating documentation and statutory updates scheduled as assessments conclude."
+    ]
 
     takeaways_li = "".join([f"<li>{t}</li>" for t in takeaways])
     takeaways_html = f"""
@@ -1535,17 +1497,7 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
   </ul>
 </div>"""
 
-    # 3. Section 1
-    sec1_paras = []
-    p_idx = 3
-    while p_idx < len(raw_paras) and len(sec1_paras) < 3:
-        sec1_paras.append(f"<p>{raw_paras[p_idx]}</p>")
-        p_idx += 1
-    if len(sec1_paras) < 2:
-        sec1_paras.append(f"<p>{dp(0)}</p>")
-    sec1_html = f"<h3>{beat_data['sec1_title']}</h3>{''.join(sec1_paras)}"
-
-    # 4. Luxury Pull-Quote Callout (Clean single typographical quotes, zero double marks)
+    # 3. Luxury Pull-Quote Callout (Clean single typographical quotes, zero double marks)
     quote_html = ""
     if primary_quote:
         clean_q = primary_quote.strip('\'"`“” \t\r\n')
@@ -1560,53 +1512,25 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
   {f'<footer class="text-xs font-mono-meta text-stone-400 not-italic mt-2">&mdash; {clean_spk}</footer>' if clean_spk else ''}
 </blockquote>"""
 
-    # 5. Section 2
-    sec2_paras = []
-    while p_idx < len(raw_paras) and len(sec2_paras) < 3:
-        sec2_paras.append(f"<p>{raw_paras[p_idx]}</p>")
-        p_idx += 1
-    if len(sec2_paras) < 2:
-        sec2_paras.append(f"<p>{dp(1)}</p>")
-    sec2_html = f"<h3>{beat_data['sec2_title']}</h3>{''.join(sec2_paras)}"
+    # 4. Remaining authentic paragraphs
+    other_paras_html = ""
+    for p in raw_paras[1:]:
+        other_paras_html += f"<p>{p}</p>"
 
-    # 6. Section 3
-    sec3_paras = []
-    while p_idx < len(raw_paras) and len(sec3_paras) < 3:
-        sec3_paras.append(f"<p>{raw_paras[p_idx]}</p>")
-        p_idx += 1
-    if len(sec3_paras) < 2:
-        sec3_paras.append(f"<p>{dp(2)}</p>")
-    sec3_html = f"<h3>{beat_data['sec3_title']}</h3>{''.join(sec3_paras)}"
+    full_html = f"{lead_p1}\n{takeaways_html}\n{other_paras_html}"
+    if quote_html:
+        full_html += f"\n{quote_html}"
 
-    # 7. Section 4
-    sec4_paras = []
-    while p_idx < len(raw_paras) and len(sec4_paras) < 3:
-        sec4_paras.append(f"<p>{raw_paras[p_idx]}</p>")
-        p_idx += 1
-    if len(sec4_paras) < 2:
-        sec4_paras.append(f"<p>{dp(3)}</p>")
-    sec4_html = f"<h3>{beat_data['sec4_title']}</h3>{''.join(sec4_paras)}"
-
-    # 8. Section 5
-    sec5_paras = []
-    while p_idx < len(raw_paras) and len(sec5_paras) < 2:
-        sec5_paras.append(f"<p>{raw_paras[p_idx]}</p>")
-        p_idx += 1
-    if len(sec5_paras) < 1:
-        sec5_paras.append(f"<p>{dp(4)}</p>")
-    sec5_paras.append("<p>Regulatory observers and sector analysts maintain that long-term outcomes will hinge on sustained operational vigilance and transparent statutory governance as implementation milestones advance.</p>")
-    sec5_html = f"<h3>{beat_data['sec5_title']}</h3>{''.join(sec5_paras)}"
-
-    full_html = f"{lead_p1}{lead_p2}{lead_p3}{takeaways_html}{sec1_html}{quote_html}{sec2_html}{sec3_html}{sec4_html}{sec5_html}"
     soup = BeautifulSoup(full_html, 'html.parser')
     word_count = len(soup.get_text().split())
-    read_time = f"{max(7, math.ceil(word_count / 180))} min read"
+    read_time = f"{max(5, math.ceil(word_count / 180))} min read"
 
     # Safely format subtitle and title strictly on word boundaries (never cut words or letters in half)
     clean_title = safe_word_bound_trim(title, 140)
     lead_first_sentence = re.split(r'(?<=[.!?])\s+', lead_sentence)[0].strip()
     clean_sub_text = re.sub(r'^[A-Z\s]{3,25}\s*[-—]\s*', '', lead_first_sentence).strip()
     clean_sub_text = re.sub(r'^[“"\'‘\s]+', '', clean_sub_text)
+    clean_sub_text = re.sub(r'^(?:Strategic assessment|Strategic overview|Key summary):\s*', '', clean_sub_text, flags=re.IGNORECASE).strip()
     clean_subtitle = safe_word_bound_trim(clean_sub_text, 160)
     if not clean_subtitle.endswith(('.', '!', '?')):
         clean_subtitle += '.'

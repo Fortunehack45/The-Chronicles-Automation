@@ -1653,7 +1653,11 @@ def clean_and_format_article_html(html: str) -> str:
     h = re.sub(r'<blockquote\b[^>]*>.*?<\/blockquote>', format_bq_match, h, flags=re.IGNORECASE | re.DOTALL)
 
     # 5. Convert ASCII and Markdown tables into responsive broadsheet tables
-    p_pattern = re.compile(r'(?:<p>\s*([A-Z0-9\s()&;:/\.,\'\"-]{4,90})\s*<\/p>\s*)?((?:<p>\s*(?:\+[-+]+\+|\|[^\n<]+)\s*<\/p>\s*){2,})', re.IGNORECASE)
+    p_pattern = re.compile(
+        r'(?:<p>\s*([A-Z0-9\s()&;:/\.,\'\"-]{4,90})\s*<\/p>\s*)?'
+        r'((?:<p>\s*(?:\+[-+]+\+|\|(?:(?!<\/p>)[\s\S])+)\s*<\/p>\s*){2,})',
+        re.IGNORECASE
+    )
 
     def replace_table_block(m):
         pre_title = m.group(1)
@@ -1747,7 +1751,10 @@ def clean_and_format_article_html(html: str) -> str:
     h = re.sub(r'([a-zA-Z0-9]):([A-Z])', r'\1: \2', h)
     h = re.sub(r'([a-zA-Z0-9]);([a-zA-Z])', r'\1; \2', h)
 
-    # 7. Clean up redundant empty tags and residual paragraph wrappers
+    # 7. Convert ASCII workflow arrows (+--->) into broadsheet callouts
+    h = re.sub(r'<p>\s*\+--+>\s*(.*?)\s*<\/p>', r'<div class="my-2 py-2 px-3.5 border-l-2 border-[#E50914] bg-[#161616] text-stone-300 text-xs sm:text-sm flex items-center gap-2.5 rounded-r-xs"><span class="text-[#E50914] font-bold">&rarr;</span><span>\1</span></div>', h)
+
+    # 8. Clean up redundant empty tags and residual paragraph wrappers
     h = re.sub(r'<p>\s*<\/p>', '', h)
     h = re.sub(r'<p>\s*(<(?:figure|div|table|h[1-6]|ul|ol|pre)\b)', r'\1', h)
     h = re.sub(r'(<\/(?:figure|div|table|h[1-6]|ul|ol|pre)>)\s*<\/p>', r'\1', h)

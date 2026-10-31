@@ -1518,8 +1518,8 @@ Start your response with exactly:
 2. SUBSTANTIAL LEAD PARAGRAPH:
 Begin the story narrative with an immersive, multi-sentence scene in {dateline} (at least 4 to 5 sentences, 80 to 120 words) detailing the setting, the human tension, the specific institutions involved, and the high-stakes implications.
 
-3. IN-DEPTH JOURNALISTIC CHAPTERS (5 to 8 SECTIONS):
-Organize the investigation into 5 to 8 distinct analytical sections using '## Section Heading':
+3. IN-DEPTH JOURNALISTIC CHAPTERS (6 to 10 SECTIONS):
+Organize the investigation into 6 to 10 distinct analytical sections using evocative, narrative broadsheet headlines (e.g. '## Behind Closed Doors in Khartoum', '## The Anatomy of the Defection', '## A Crisis Across the Border'). NEVER write the literal words 'Section Heading' or 'Chapter' in your headers:
 - Historical roots, institutional context, and chronology leading to this moment
 - Detailed examination of key political, regulatory, or economic documents and disclosures
 - Substantive on-the-ground atmosphere, community impact, and civic welfare
@@ -1589,7 +1589,8 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
                 else:
                     sections_html.append(p_group)
                 current_paras = []
-            current_heading = h_match.group(1).strip()
+            h_text = h_match.group(1).strip()
+            current_heading = re.sub(r'^(?:Section\s+Heading|Chapter\s+\d+|Section\s+\d+|Part\s+\d+|Heading):\s*', '', h_text, flags=re.IGNORECASE).strip()
             continue
 
         q_match = re.match(r'^>\s*(.+)', l)
@@ -1604,6 +1605,9 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
 
             q_clean = re.sub(r'^[“"\'‘\s]+|[”"\'’\s]+$', '', raw_q)
             q_clean = re.sub(r'[,;:\s]+$', '', q_clean)
+            q_clean = re.sub(r'[,;]\.([”"’\'])', r'.\1', q_clean)
+            q_clean = re.sub(r'\.[,;]([”"’\'])', r'.\1', q_clean)
+            q_clean = re.sub(r'([.,;!?])[.,;!?]+', r'\1', q_clean)
             if q_clean and not q_clean.endswith(('.', '!', '?')):
                 q_clean += '.'
 
@@ -1777,14 +1781,20 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
     lead_sentence = re.sub(r'^[“"\'‘\s]+', '', lead_sentence)
     lead_p1 = build_lead_paragraph_with_dropcap(lead_sentence)
 
-    # 2. Executive Callout Box: Summary
+    # 2. Executive Callout Box: Concrete Factual Summary
     clean_t = re.sub(r'^(?:BREAKING|EXCLUSIVE|REPORT):\s*', '', title, flags=re.IGNORECASE).strip()
-    takeaways = [
-        f"Verified broadsheet reporting filed from {dateline} under strict editorial standards.",
-        f"Official briefings confirm operational details regarding {clean_t}.",
-        f"Institutional observers and regulatory oversight bodies tracking subsequent disclosures.",
-        f"Corroborating documentation and statutory updates scheduled as assessments conclude."
-    ]
+    takeaways = []
+    if len(raw_paras) >= 3:
+        for p in raw_paras[1:4]:
+            first_s = re.split(r'(?<=[.!?])\s+', p)[0].strip()
+            if len(first_s) > 30 and len(first_s) < 180:
+                takeaways.append(first_s)
+    if len(takeaways) < 3:
+        takeaways = [
+            f"Key developments unfolding in {dateline} concerning {clean_t}.",
+            f"Primary stakeholders and observers evaluate regional and sectoral outcomes.",
+            f"Follow-up inquiries and operational updates are ongoing as events develop."
+        ]
 
     takeaways_li = "".join([f"<li>{t}</li>" for t in takeaways])
     takeaways_html = f"""
@@ -1884,12 +1894,16 @@ def process_single_article(
         now_iso = datetime.now(timezone.utc).isoformat()
         article_id = str(uuid.uuid4())
 
+        # Strictly ensure 'NIGERIA' is never added to tags unless the article is genuinely NIGERIA
+        category_tag = editorial['category']
         tags = [
-            editorial['category'],
-            item['region'].upper(),
+            category_tag,
+            editorial['dateline'],
             editorial['dispatch_type'],
             'VERIFIED_DISPATCH'
         ]
+        if category_tag == 'NIGERIA' and 'NIGERIA' not in tags:
+            tags.insert(1, 'NIGERIA')
 
         published_at = editorial.get('published_at') or now_iso
 

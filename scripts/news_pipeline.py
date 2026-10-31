@@ -1444,31 +1444,37 @@ def fetch_wire_articles(feed: dict) -> List[dict]:
 def generate_broadsheet_article_gemini(title: str, raw_text: str, category: str, dateline: str) -> str:
     """
     Invokes Gemini 3.5 Flash Lite using the provided API key to rewrite raw wire copy
-    into a comprehensive, deeply reported broadsheet investigative report (1,500 - 3,500+ words).
-    Applies authentic journalistic tone specific to the article beat.
+    into a comprehensive, deeply reported human broadsheet investigative report (2,000 - 3,500+ words).
+    Applies authentic journalistic tone specific to the article beat with zero robotic AI clichés.
     """
     if not gemini_client:
         return ""
     
     tone = CATEGORY_TONES.get(category, CATEGORY_TONES['WORLD'])
-    prompt = f"""You are a senior investigative correspondent and lead broadsheet writer for The Chronicles, an internationally acclaimed prestige newspaper.
+    prompt = f"""You are a senior investigative correspondent for The Chronicles, an internationally acclaimed prestige newspaper.
 Category: {category}
 Dateline City: {dateline}
-Style & Tone: {tone}
+Style & Editorial Voice: {tone}
 
-Source Headline: {title}
+Article Title: {title}
 Source Wire Copy:
 {raw_text[:4000]}
 
 Task:
-Write a comprehensive, deeply reported, authentic broadsheet journalism investigation (target 2,000 to 3,500 words).
-Requirements:
-1. Begin with an evocative, powerful opening narrative starting from {dateline} establishing the operational reality.
-2. Structure the investigative report with 4 to 6 compelling section subheadings (formatted as '## Heading').
-3. Include forensic investigative details, institutional review, statutory/regulatory context, chronological background, and stakeholder perspectives.
-4. Include authentic direct quotes with speaker attribution from officials, spokespersons, or institutions mentioned in the wire copy.
-5. Write in human, elegant, sophisticated prose. Strictly NO robotic cliches like 'In conclusion', 'It remains to be seen', 'As we navigate', 'testament', 'tapestry', 'beacon', 'delve'.
-6. Do not include markdown bold on entire paragraphs or conversational meta text. Only write the actual article text.
+Write a comprehensive, deeply reported, authentic broadsheet investigative article (target 2,000 to 3,500 words).
+Structure Requirements:
+1. KEY TAKEAWAYS: Begin your response with:
+### KEY DEVELOPMENTS
+- [Specific factual takeaway #1 about this story]
+- [Specific factual takeaway #2 about this story]
+- [Specific factual takeaway #3 about this story]
+- [Specific factual takeaway #4 about this story]
+
+2. OPENING NARRATIVE: Start the body with a vivid, multi-sentence scene from {dateline} establishing the operational reality, the key people, and the stakes (minimum 60 words).
+3. SECTION SUBHEADINGS: Include 5 to 7 compelling, story-specific subheadings (formatted as '## Heading').
+4. REAL QUOTES: Seamlessly weave in direct quotes from named officials, witnesses, or spokespersons mentioned in the copy.
+5. PURE HUMAN JOURNALISM: Strictly BANNED words and clichés: 'tapestry', 'beacon', 'testament', 'delve', 'In conclusion', 'It remains to be seen', 'As we navigate', 'operational reality', 'statutory disclosures', 'verified broadsheet reporting', 'compliance with international conventions'.
+Return only the journalistic piece.
 """
     try:
         interaction = gemini_client.interactions.create(
@@ -1484,17 +1490,33 @@ Requirements:
 def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline: str) -> dict:
     """
     Transforms Gemini broadsheet output into structured broadsheet HTML
-    with a 2-line red drop cap, executive summary box, section subheadings, and blockquotes.
+    with a seamless red drop cap, story-specific summary box, section subheadings, and clean blockquotes.
     """
     lines = text.strip().split('\n')
     sections_html = []
     current_paras = []
     current_heading = None
+    extracted_bullets = []
+    in_key_developments = False
 
     for line in lines:
         l = line.strip()
         if not l:
             continue
+
+        if re.match(r'^#{1,3}\s+KEY DEVELOPMENTS', l, flags=re.IGNORECASE):
+            in_key_developments = True
+            continue
+
+        if in_key_developments:
+            b_match = re.match(r'^[-*•]\s+(.+)', l)
+            if b_match:
+                extracted_bullets.append(b_match.group(1).strip())
+                if len(extracted_bullets) >= 4:
+                    in_key_developments = False
+                continue
+            else:
+                in_key_developments = False
 
         h_match = re.match(r'^#{1,3}\s+(.+)', l)
         if h_match:
@@ -1510,8 +1532,24 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
 
         q_match = re.match(r'^>\s*(.+)', l)
         if q_match:
-            q_clean = q_match.group(1).strip('\'"`“” \t\r\n')
-            current_paras.append(f'</blockquote><blockquote class="my-6 border-l-4 border-[#E50914] pl-4 italic text-stone-100 font-editorial text-lg leading-relaxed">&ldquo;{q_clean}&rdquo;</blockquote><p>')
+            raw_q = q_match.group(1).strip()
+            # Split quote and speaker if present e.g. "Quote" - Name
+            spk = ""
+            spk_match = re.search(r'["”]\s*[-—–]\s*(.+)$', raw_q)
+            if spk_match:
+                spk = spk_match.group(1).strip('\'"`“” \t\r\n— -')
+                raw_q = raw_q[:spk_match.start() + 1]
+
+            q_clean = re.sub(r'^[“"\'‘\s]+|[”"\'’\s]+$', '', raw_q)
+            q_clean = re.sub(r'[,;:\s]+$', '', q_clean)
+            if q_clean and not q_clean.endswith(('.', '!', '?')):
+                q_clean += '.'
+
+            # Only show speaker if it's a real name or institution
+            spk_clean = spk if spk and not any(k in spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']) else ""
+            footer_html = f'<footer class="text-xs font-mono-meta text-stone-400 not-italic mt-2">&mdash; {spk_clean}</footer>' if spk_clean else ''
+            
+            current_paras.append(f'</blockquote><blockquote class="my-6 border-l-4 border-[#E50914] pl-4 italic text-stone-100 font-editorial text-lg leading-relaxed">&ldquo;{q_clean}&rdquo;{footer_html}</blockquote><p>')
             continue
 
         clean_p = re.sub(r'[*_]{2,}', '', l).strip()
@@ -1527,27 +1565,35 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
 
     full_body = "".join(sections_html)
 
-    first_p_match = re.search(r'<p>(.*?)</p>', full_body, flags=re.DOTALL)
-    first_p = first_p_match.group(1) if first_p_match else ""
-    first_p = re.sub(r'^[A-Z\s]{3,25}\s*[-—]\s*', '', first_p).strip()
-    first_p = re.sub(r'^[“"\'‘\s]+', '', first_p)
+    # Extract substantive first paragraph (> 30 words) for the lead drop cap
+    all_paras = re.findall(r'<p>(.*?)</p>', full_body, flags=re.DOTALL)
+    first_p = ""
+    for p_candidate in all_paras:
+        p_clean = re.sub(r'^[A-Z\s]{3,25}\s*[-—]\s*', '', p_candidate).strip()
+        p_clean = re.sub(r'^[“"\'‘\s]+', '', p_clean)
+        if len(p_clean.split()) >= 15:
+            first_p = p_clean
+            break
+    if not first_p and all_paras:
+        first_p = re.sub(r'^[“"\'‘\s]+', '', all_paras[0]).strip()
 
-    first_word = first_p.split(' ')[0] if ' ' in first_p else first_p
-    first_char = first_word[0] if first_word else 'T'
-    rest_of_first_word = first_word[1:] if len(first_word) > 1 else ''
-    rest_of_p1 = first_p[len(first_word):].strip()
+    first_char = first_p[0] if first_p else 'T'
+    rest_of_first_p = first_p[1:] if len(first_p) > 1 else ''
 
-    lead_p1 = f'<p><span class="float-left text-5xl sm:text-6xl font-editorial font-bold text-[#E50914] pr-2.5 pt-1.5 pb-1 leading-none uppercase">{first_char}</span>{rest_of_first_word} {rest_of_p1}</p>'
+    lead_p1 = f'<p><span class="drop-cap-red">{first_char}</span>{rest_of_first_p}</p>'
     body_after_lead = re.sub(r'^.*?<p>.*?</p>', '', full_body, count=1, flags=re.DOTALL)
 
+    # Use story-specific bullet points from Gemini; fallback to real sentences from text
     clean_t = re.sub(r'^(?:BREAKING|EXCLUSIVE|REPORT):\s*', '', title, flags=re.IGNORECASE).strip()
-    bullets = [
-        f"Authoritative broadsheet investigation filed from {dateline} under strict standards.",
-        f"Deep operational reporting and forensic briefing regarding {clean_t}.",
-        f"Key institutional observers and regulatory oversight bodies tracking subsequent disclosures.",
-        f"Official documentation and verified disclosures scheduled as review procedures conclude."
-    ]
-    bullets_li = "".join([f"<li>{b}</li>" for b in bullets])
+    if not extracted_bullets:
+        cand_sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', BeautifulSoup(body_after_lead, 'html.parser').get_text()) if len(s.strip()) > 35]
+        extracted_bullets = cand_sentences[:4] if len(cand_sentences) >= 4 else [
+            f"Field reporting from {dateline} details operational progress regarding {clean_t}.",
+            f"Key stakeholders, regulatory authorities, and independent analysts evaluate long-term outcomes.",
+            f"Forensic chronology and statutory records reflect ongoing investigative milestones."
+        ]
+
+    bullets_li = "".join([f"<li>{b}</li>" for b in extracted_bullets[:4]])
     summary_html = f"""
 <div class="my-6 p-5 bg-[#181818] border border-[#2D2D2D] rounded-xs">
   <h4 class="font-mono-meta text-xs uppercase tracking-wider text-[#E50914] font-bold mb-3">Summary</h4>

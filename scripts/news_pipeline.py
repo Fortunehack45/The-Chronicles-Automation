@@ -1493,30 +1493,49 @@ def generate_broadsheet_article_gemini(title: str, raw_text: str, category: str,
         return ""
     
     tone = CATEGORY_TONES.get(category, CATEGORY_TONES['WORLD'])
-    prompt = f"""You are a senior investigative correspondent for The Chronicles, an internationally acclaimed prestige newspaper.
-Category: {category}
+    prompt = f"""You are the Chief Foreign & National Correspondent for The Chronicles, an internationally acclaimed prestige newspaper celebrated for long-form investigative journalism and deep literary reporting.
+
+Beat / Category: {category}
 Dateline City: {dateline}
 Style & Editorial Voice: {tone}
 
-Article Title: {title}
+Article Headline: {title}
 Source Wire Copy:
 {raw_text[:4000]}
 
-Task:
-Write a comprehensive, deeply reported, authentic broadsheet investigative article (target 2,000 to 3,500 words).
-Structure Requirements:
-1. KEY TAKEAWAYS: Begin your response with:
-### KEY DEVELOPMENTS
-- [Specific factual takeaway #1 about this story]
-- [Specific factual takeaway #2 about this story]
-- [Specific factual takeaway #3 about this story]
-- [Specific factual takeaway #4 about this story]
+MANDATORY JOURNALISTIC ASSIGNMENT:
+Write an exhaustive, deeply reported, long-form broadsheet investigative report between 3,000 and 5,000+ words.
 
-2. OPENING NARRATIVE: Start the body with a vivid, multi-sentence scene from {dateline} establishing the operational reality, the key people, and the stakes (minimum 60 words).
-3. SECTION SUBHEADINGS: Include 5 to 7 compelling, story-specific subheadings (formatted as '## Heading').
-4. REAL QUOTES: Seamlessly weave in direct quotes from named officials, witnesses, or spokespersons mentioned in the copy.
-5. PURE HUMAN JOURNALISM: Strictly BANNED words and clichés: 'tapestry', 'beacon', 'testament', 'delve', 'In conclusion', 'It remains to be seen', 'As we navigate', 'operational reality', 'statutory disclosures', 'verified broadsheet reporting', 'compliance with international conventions'.
-Return only the journalistic piece.
+FORMAT & STRUCTURE RULES:
+1. KEY DEVELOPMENTS SUMMARY:
+Start your response with exactly:
+### KEY DEVELOPMENTS
+- [First concrete, story-specific factual takeaway with names, entities, and figures]
+- [Second concrete, story-specific factual takeaway]
+- [Third concrete, story-specific factual takeaway]
+- [Fourth concrete, story-specific factual takeaway]
+
+2. SUBSTANTIAL LEAD PARAGRAPH:
+Begin the story narrative with an immersive, multi-sentence scene in {dateline} (at least 4 to 5 sentences, 80 to 120 words) detailing the setting, the human tension, the specific institutions involved, and the high-stakes implications.
+
+3. IN-DEPTH JOURNALISTIC CHAPTERS (5 to 8 SECTIONS):
+Organize the investigation into 5 to 8 distinct analytical sections using '## Section Heading':
+- Historical roots, institutional context, and chronology leading to this moment
+- Detailed examination of key political, regulatory, or economic documents and disclosures
+- Substantive on-the-ground atmosphere, community impact, and civic welfare
+- Critical evaluation of the conflicting interests of primary stakeholders
+- Strategic ripple effects across national, regional, and international fronts
+- Forward-looking analysis of upcoming milestones, litigation, policy debates, or market reactions
+
+4. REAL SPEAKER QUOTES:
+Incorporate direct quotes from real persons, witnesses, officials, or spokespersons identified in the source text using markdown blockquotes:
+> "Direct quote from named individual..." - Official Full Name, Title
+
+5. PURE HUMAN JOURNALISTIC PROSE (NO ROBOTIC CLICHÉS):
+- Write with the authoritative, literary cadence of The New Yorker, The Financial Times, or The Washington Post.
+- STRICTLY FORBIDDEN filler words and AI tropes: 'tapestry', 'beacon', 'testament', 'delve', 'In conclusion', 'It remains to be seen', 'As we navigate', 'operational reality', 'statutory disclosures', 'verified broadsheet reporting', 'compliance with international conventions', 'fosters', 'crucial', 'pivotal moment', 'underscores'.
+
+Provide only the long-form broadsheet journalistic piece.
 """
     try:
         interaction = gemini_client.interactions.create(
@@ -1613,11 +1632,14 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
     for p_candidate in all_paras:
         p_clean = re.sub(r'^[A-Z\s]{3,25}\s*[-—]\s*', '', p_candidate).strip()
         p_clean = re.sub(r'^[“"\'‘\s]+', '', p_clean)
-        if len(p_clean.split()) >= 15:
+        if len(p_clean.split()) >= 30:
             first_p = p_clean
             break
     if not first_p and all_paras:
-        first_p = re.sub(r'^[“"\'‘\s]+', '', all_paras[0]).strip()
+        if len(all_paras) >= 2:
+            first_p = (all_paras[0].strip() + " " + all_paras[1].strip()).strip()
+        else:
+            first_p = re.sub(r'^[“"\'‘\s]+', '', all_paras[0]).strip()
 
     first_char = first_p[0] if first_p else 'T'
     rest_of_first_p = first_p[1:] if len(first_p) > 1 else ''
@@ -1663,6 +1685,7 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
     return {
         'subtitle': clean_subtitle,
         'body_html': final_html,
+        'content_html': final_html,
         'read_time': read_time
     }
 
@@ -1701,7 +1724,8 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
                 return {
                     'title': clean_title,
                     'subtitle': editorial['subtitle'],
-                    'body_html': editorial['body_html'],
+                    'content_html': editorial['content_html'],
+                    'body_html': editorial['content_html'],
                     'category': category,
                     'dateline': dateline,
                     'author': determine_author_desk(category, dateline, item.get('feed_region', '')),
@@ -1716,7 +1740,7 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
     # 4. Extract Real Quote & Deduplicate from text
     primary_quote, quote_speaker, cleaned_body_text = extract_and_attribute_quote(
         full_body_text,
-        default_speaker=f"{category.title()} Affairs Desk"
+        default_speaker=""
     )
 
     # 5. Extract Authentic Scraped Paragraphs & Deduplicate Quote
@@ -1776,9 +1800,12 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
         clean_q = primary_quote.strip('\'"`“” \t\r\n')
         clean_q = re.sub(r'&(?:quot|ldquo|rdquo);', '', clean_q)
         clean_q = re.sub(r'["“”]{2,}', '"', clean_q).strip('\'"`“” \t\r\n')
+        clean_q = re.sub(r'[,;:\s]+$', '', clean_q)
         if clean_q and not clean_q.endswith(('.', '!', '?')):
             clean_q += '.'
         clean_spk = (quote_speaker or '').strip('\'"`“” \t\r\n— -')
+        if any(k in clean_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
+            clean_spk = ''
         quote_html = f"""
 <blockquote class="my-6 border-l-4 border-[#E50914] pl-4 italic text-stone-100 font-editorial text-lg leading-relaxed">
   &ldquo;{clean_q}&rdquo;

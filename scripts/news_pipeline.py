@@ -1615,27 +1615,63 @@ def clean_and_format_article_html(html: str) -> str:
     h = h.replace("\u0092", "'").replace("\u0091", "'")
     h = h.replace("\u0093", '"').replace("\u0094", '"')
 
-    # 2. Fix headings: remove markdown hashes and AI labels (e.g. <h3>## Title</h3>)
+    # 2. Strip raw wire scheduling junk (e.g. Who: Liverpool vs Arsenal What: ... When: ... Where: ... How to follow: ...)
+    h = re.sub(r'<p><span class="drop-cap-red">[A-Za-z]</span>ho:\s*Liverpool vs Arsenal What:[\s\S]*?Humiliated by', '<p><span class="drop-cap-red">H</span>umiliated by', h, flags=re.IGNORECASE)
+    h = re.sub(r'<p>\s*(?:Who|What|When|Where|How to follow):\s*[^<]+(?:(?:Who|What|When|Where|How to follow):[^<]+)*</p>', '', h, flags=re.IGNORECASE)
+    h = re.sub(r'\b(?:Who|What|When|Where|How to follow):\s*[^<.\n]+\b', '', h, flags=re.IGNORECASE)
+
+    # 3. Fix headings: remove markdown hashes and AI labels (e.g. <h3>## Title</h3>)
     h = re.sub(r'<h3([^>]*)>\s*(?:#{1,4}\s*|(?:Section\s+Heading|Chapter\s+\d+|Section\s+\d+|Part\s+\d+|Heading):\s*)+', r'<h3\1>', h, flags=re.IGNORECASE)
 
-    # 3. Fix broken blockquote wrappers and stray tags
+    # 4. Reset any existing figures and unnest blockquotes to avoid cascading borders
+    h = re.sub(r'</?figure\b[^>]*>', '', h, flags=re.IGNORECASE)
+    while re.search(r'<blockquote\b[^>]*>\s*<blockquote\b[^>]*>', h, re.IGNORECASE):
+        h = re.sub(r'<blockquote\b[^>]*>\s*<blockquote\b[^>]*>', '<blockquote>', h, flags=re.IGNORECASE)
+    while re.search(r'</blockquote>\s*</blockquote>', h, re.IGNORECASE):
+        h = re.sub(r'</blockquote>\s*</blockquote>', '</blockquote>', h, flags=re.IGNORECASE)
+
+    # 5. Fix broken blockquote wrappers and stray tags
     h = re.sub(r'</p>\s*<p>\s*</blockquote>', r'</p></blockquote>', h)
     h = re.sub(r'<p>\s*</blockquote>', r'</blockquote>', h)
     h = re.sub(r'</blockquote>\s*<p>\s*</blockquote>', r'</blockquote>', h)
     h = re.sub(r'</blockquote>\s*<p>(?=\s*<(?:h[1-6]|div|figure|blockquote|table)|$)', r'</blockquote>', h)
 
-    # 4. Standardize blockquotes into professional broadsheet pullquotes
+    # 6. Standardize blockquotes into exactly ONE clean broadsheet pullquote with correct speaker attribution
     def format_bq_match(match):
-        bq_content = match.group(0)
+        full_prev = match.group(1)
+        bq_content = match.group(2)
         speaker = ""
-        footer_match = re.search(r'<footer[^>]*>\s*(?:&mdash;|—|-)?\s*(.*?)\s*<\/footer>', bq_content, flags=re.IGNORECASE | re.DOTALL)
+        footer_match = re.search(r'<(?:footer|figcaption)[^>]*>\s*(?:&mdash;|—|-)?\s*(.*?)\s*</(?:footer|figcaption)>', bq_content, flags=re.IGNORECASE | re.DOTALL)
         if footer_match:
             raw_spk = re.sub(r'<[^>]+>', '', footer_match.group(1)).strip('\'"-— \t\r\n')
             if not any(k in raw_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
                 speaker = raw_spk
-            bq_content = re.sub(r'<footer[^>]*>.*?<\/footer>', '', bq_content, flags=re.IGNORECASE | re.DOTALL)
+            bq_content = re.sub(r'<(?:footer|figcaption)[^>]*>.*?</(?:footer|figcaption)>', '', bq_content, flags=re.IGNORECASE | re.DOTALL)
 
-        quote_text = re.sub(r'<\/?(?:p|blockquote)[^>]*>', '', bq_content).strip()
+        if not speaker and full_prev:
+            prev_chunk = full_prev[-450:]
+            m_role = re.search(r'([A-Z][a-zA-Z\s.\'-]{2,35})\s*\(([^)]+)\)\s*:', prev_chunk)
+            if m_role:
+                name = m_role.group(1).strip()
+                role = m_role.group(2).strip()
+                if not any(k in name.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial', 'section', 'part', 'chapter']):
+                    speaker = f"{name}, {role}"
+            else:
+                m_said1 = re.search(r'([A-Z][a-zA-Z\s.\'-]{2,35})\s*,\s*([^<.,\n]+?)\s*,\s*(?:said|stated|remarked|declared|noted|explained|added)\b', prev_chunk, re.IGNORECASE)
+                if m_said1:
+                    name = m_said1.group(1).strip()
+                    role = m_said1.group(2).strip()
+                    if not any(k in name.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
+                        speaker = f"{name}, {role}"
+                else:
+                    m_said2 = re.search(r'(?:said|stated|remarked|declared|noted|warned|explained)\s+([A-Z][a-zA-Z\s.\'-]{2,35})(?:\s*,\s*([^<.,\n]+))?', prev_chunk, re.IGNORECASE)
+                    if m_said2:
+                        name = m_said2.group(1).strip()
+                        role = m_said2.group(2).strip() if m_said2.group(2) else ""
+                        if not any(k in name.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
+                            speaker = f"{name}, {role}" if role else name
+
+        quote_text = re.sub(r'<\/?(?:p|blockquote|footer|figcaption|span)[^>]*>', '', bq_content).strip()
         quote_text = re.sub(r'<p>\s*<\/p>', '', quote_text).strip()
         quote_text = re.sub(r'^(?:&ldquo;|“|"|\'|‘|\s)+|(?:&rdquo;|”|"|\'|’|\s)+$', '', quote_text).strip()
         quote_text = re.sub(r'[,;]\.([”"’\'])', r'.\1', quote_text)
@@ -1645,12 +1681,12 @@ def clean_and_format_article_html(html: str) -> str:
             quote_text += '.'
 
         if not quote_text:
-            return ''
+            return full_prev
 
         fig_cap = f'<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{speaker}</span></figcaption>' if speaker else ''
-        return f'<figure class="my-8 py-5 px-6 border-l-4 border-[#E50914] bg-[#161616]/80 rounded-r-xs shadow-md"><blockquote class="font-editorial italic text-stone-100 text-lg sm:text-xl leading-relaxed">&ldquo;{quote_text}&rdquo;</blockquote>{fig_cap}</figure>'
+        return f'{full_prev}<figure class="my-8 py-5 px-6 border-l-4 border-[#E50914] bg-[#161616]/90 rounded-r-xs shadow-md"><blockquote class="font-editorial italic text-stone-100 text-lg sm:text-xl leading-relaxed border-none pl-0 m-0">&ldquo;{quote_text}&rdquo;</blockquote>{fig_cap}</figure>'
 
-    h = re.sub(r'<blockquote\b[^>]*>.*?<\/blockquote>', format_bq_match, h, flags=re.IGNORECASE | re.DOTALL)
+    h = re.sub(r'([\s\S]{0,450})<blockquote\b[^>]*>(.*?)<\/blockquote>', format_bq_match, h, flags=re.IGNORECASE | re.DOTALL)
 
     # 5. Convert ASCII and Markdown tables into responsive broadsheet tables
     p_pattern = re.compile(

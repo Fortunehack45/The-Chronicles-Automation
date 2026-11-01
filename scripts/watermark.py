@@ -6,6 +6,7 @@ Strictly ensures 16:9 aspect ratio, high resolution, and clean professional bran
 
 import io
 import urllib.request
+from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
 
 # Target broadsheet display dimensions
@@ -14,8 +15,24 @@ CANONICAL_HEIGHT = 675
 ASPECT_RATIO = CANONICAL_WIDTH / CANONICAL_HEIGHT
 
 
-def fetch_image_bytes(image_url: str, timeout: int = 15) -> bytes:
+def is_valid_image_url(url: str) -> bool:
+    """Validate that URL points to an image, not a video, audio, or document."""
+    if not url or not isinstance(url, str) or not url.startswith('http'):
+        return False
+    u = url.lower().split('?')[0]
+    bad_exts = ('.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m3u8', '.ts', '.mp3', '.wav', '.pdf', '.svg')
+    if any(u.endswith(ext) for ext in bad_exts):
+        return False
+    bad_tokens = ['/clips/', '/video/', 'banner-ad', 'tracker', 'pixel', '1x1', 'gravatar']
+    if any(tok in u for tok in bad_tokens):
+        return False
+    return True
+
+
+def fetch_image_bytes(image_url: str, timeout: int = 12) -> Optional[bytes]:
     """Download image binary data from a verified news wire URL."""
+    if not is_valid_image_url(image_url):
+        return None
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -23,9 +40,18 @@ def fetch_image_bytes(image_url: str, timeout: int = 15) -> bytes:
             "Chrome/124.0.0.0 Safari/537.36"
         )
     }
-    req = urllib.request.Request(image_url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+    try:
+        req = urllib.request.Request(image_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content_type = resp.headers.get('Content-Type', '').lower()
+            if 'video' in content_type or 'audio' in content_type or 'html' in content_type:
+                return None
+            data = resp.read()
+            if len(data) < 1000:
+                return None
+            return data
+    except Exception:
+        return None
 
 
 def crop_to_aspect_ratio(img: Image.Image, target_ratio: float = ASPECT_RATIO) -> Image.Image:
@@ -48,21 +74,27 @@ def crop_to_aspect_ratio(img: Image.Image, target_ratio: float = ASPECT_RATIO) -
         return img.crop((0, offset, width, offset + new_height))
 
 
-def apply_chronicles_watermark(image_input) -> bytes:
+def apply_chronicles_watermark(image_input) -> Optional[bytes]:
     """
     Takes raw image bytes OR image URL string, crops to 16:9, resizes to 1200x675,
     and composites The Chronicles luxury editorial brand mark badge.
-    Returns optimized JPEG bytes ready for Supabase storage.
+    Returns optimized JPEG bytes ready for Supabase storage, or None on failure.
     """
-    if isinstance(image_input, str):
-        image_data = fetch_image_bytes(image_input)
-    else:
-        image_data = image_input
+    try:
+        if isinstance(image_input, str):
+            image_data = fetch_image_bytes(image_input)
+        else:
+            image_data = image_input
 
-    # 1. Open original image
-    raw_img = Image.open(io.BytesIO(image_data))
-    if raw_img.mode != "RGB":
-        raw_img = raw_img.convert("RGB")
+        if not image_data:
+            return None
+
+        # 1. Open original image
+        raw_img = Image.open(io.BytesIO(image_data))
+        if raw_img.mode != "RGB":
+            raw_img = raw_img.convert("RGB")
+    except Exception:
+        return None
 
     # 2. Crop to 16:9 and resize to canonical dimensions
     cropped = crop_to_aspect_ratio(raw_img)

@@ -36,7 +36,8 @@
     "https://www.bbc.co.uk/sport/football/articles/cqd09p3kppyvo?at_medium=RSS&at_campaign=rss": 1793409994.4048257,
     "https://www.bbc.co.uk/news/articles/cr93zxyn9eqeo?at_medium=RSS&at_campaign=rss": 1793409994.4432316,
     "https://punchng.com/dowen-college-swimmer-clinches-four-medals-at-nnpc-snepco/?utm_source=rss.punchng.com&utm_medium=web": 1793409996.5389895,
-    "https://www.npr.org/2026/10/29/nx-s1-6003916/student-loans-closed-colleges-education-department-trump-biden": 1793409997.3056948
+    "https://www.npr.org/2026/10/29/nx-s1-6003916/student-loans-closed-colleges-education-department-trump-biden": 1793409997.3056948,
+    "https://punchng.com/obi-not-better-than-me-says-umahi/?utm_source=rss.punchng.com&utm_medium=web": 1793572687.2600038
   },
   "stories": [
     {
@@ -633,6 +634,17 @@
         "lawsuit"
       ],
       "timestamp": 1793409997.3056948
+    },
+    {
+      "slug": "obi-not-better-than-me-says-umahi",
+      "title": "Obi not better than me, says Umahi",
+      "category": "POLITICS",
+      "tokens": [
+        "obi",
+        "umahi",
+        "better"
+      ],
+      "timestamp": 1793572687.2600038
     }
   ]
 }

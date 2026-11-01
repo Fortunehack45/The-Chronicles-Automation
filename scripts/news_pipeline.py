@@ -1645,7 +1645,7 @@ def clean_and_format_article_html(html: str) -> str:
     # 6. Merge adjacent attribution figure or paragraph into preceding figure
     adj_attr_regex = re.compile(
         r'(<figure\b[^>]*>\s*<blockquote\b[^>]*>[\s\S]*?</blockquote>\s*)(?:<figcaption\b[^>]*>[\s\S]*?</figcaption>\s*)?</figure>\s*'
-        r'<(?:p|blockquote|figure)[^>]*>(?:\s*<blockquote\b[^>]*>)?\s*(?:<p[^>]*>)?\s*(?:&ldquo;|“|"|\s)*(?:&mdash;|—|-{1,2}|–)\s*([A-Za-z0-9\s.,'"()&/–—-]{3,120}?)\s*(?:&rdquo;|”|"|\s)*(?:</p>)?(?:\s*</blockquote>)?\s*</(?:p|blockquote|figure)>',
+        r'<(?:p|blockquote|figure)[^>]*>(?:\s*<blockquote\b[^>]*>)?\s*(?:<p[^>]*>)?\s*(?:&ldquo;|“|"|\s)*(?:&mdash;|—|-{1,2}|–)\s*([^\s<>\r\n][^<>\r\n]{2,120}?)\s*(?:&rdquo;|”|"|\s)*(?:</p>)?(?:\s*</blockquote>)?\s*</(?:p|blockquote|figure)>',
         re.IGNORECASE
     )
     def repl_adj_attr(m):
@@ -1666,7 +1666,7 @@ def clean_and_format_article_html(html: str) -> str:
     # 8. Transform any remaining bare blockquotes into clean broadsheet figures
     bare_bq_regex = re.compile(
         r'<blockquote\b[^>]*>([\s\S]*?)</blockquote>'
-        r'(?:\s*<(?:p|figcaption|footer)[^>]*>\s*(?:&mdash;|—|-{1,2}|–)?\s*([A-Za-z0-9\s.,'"()&/–—-]{3,100}?)\s*</(?:p|figcaption|footer)>)?',
+        r'(?:\s*<(?:p|figcaption|footer)[^>]*>\s*(?:&mdash;|—|-{1,2}|–)?\s*([^\s<>\r\n][^<>\r\n]{2,100}?)\s*</(?:p|figcaption|footer)>)?',
         re.IGNORECASE
     )
     def repl_bare_bq(m):
@@ -1716,7 +1716,7 @@ def clean_and_format_article_html(html: str) -> str:
 
     # 12. Convert ASCII, Unicode diagrams, and Markdown tables into responsive broadsheet tables
     table_block_regex = re.compile(
-        r'(?:<p>\s*([A-Za-z0-9\s()&;:/\.,'"-]{4,90})\s*<\/p>\s*)?'
+        r'(?:<p>\s*([^<>]{4,90})\s*<\/p>\s*)?'
         r'((?:<p>\s*(?:[+┌└├▼][-+═─│|\s►•₦X]+|[│|](?:(?!<\/p>)[\s\S])+)\s*<\/p>\s*){2,})',
         re.IGNORECASE
     )

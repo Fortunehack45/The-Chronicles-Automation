@@ -1319,10 +1319,40 @@ def is_valid_press_image(url: str) -> bool:
     bad_exts = ('.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m3u8', '.ts', '.mp3', '.wav', '.pdf', '.svg')
     if any(u.endswith(ext) for ext in bad_exts):
         return False
-    bad_tokens = ['logo', 'icon', 'pixel', 'avatar', 'banner-ad', 'tracker', 'emoji', 'gravatar', '1x1', '/clips/', '/video/']
+    bad_tokens = ['logo', 'icon', 'pixel', 'avatar', 'banner-ad', 'tracker', 'emoji', 'gravatar', '1x1', '/clips/', '/video/', 'punch-logo', 'default', 'placeholder', 'fallback', 'dummy']
     if any(token in u for token in bad_tokens):
         return False
     return True
+
+
+def fetch_story_image_from_webpage(link: str) -> Optional[str]:
+    """Scrapes authentic news photo directly from the article webpage (og:image, twitter:image)."""
+    if not link or not link.startswith('http'):
+        return None
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        }
+        resp = requests.get(link, headers=headers, timeout=8)
+        if resp.status_code == 200 and resp.text:
+            html = resp.text
+            # 1. og:image
+            m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+            if not m:
+                m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', html, re.IGNORECASE)
+            # 2. twitter:image
+            if not m:
+                m = re.search(r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+            if not m:
+                m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']', html, re.IGNORECASE)
+            if m:
+                candidate = m.group(1).strip()
+                if is_valid_press_image(candidate):
+                    return candidate
+    except Exception as e:
+        logger.debug(f"Webpage image scrape failed for {link[:40]}: {e}")
+    return None
 
 
 def is_boilerplate(text: str) -> bool:
@@ -2200,17 +2230,21 @@ def process_single_article(
         if not slug or len(slug) < 5:
             slug = clean_slug(item['title'])
 
-        raw_image_url = item.get('image_url') or CURATED_BEAT_COVERS.get(editorial.get('category', 'WORLD'), CURATED_BEAT_COVERS['WORLD'])
+        curated_fallback = CURATED_BEAT_COVERS.get(editorial.get('category', 'WORLD'), CURATED_BEAT_COVERS['WORLD'])
+        raw_image_url = item.get('image_url')
+
+        # If image is missing, invalid, or generic fallback, scrape authentic story photo directly from article webpage
+        if not raw_image_url or raw_image_url in CURATED_BEAT_COVERS.values() or not is_valid_press_image(raw_image_url):
+            scraped_img = fetch_story_image_from_webpage(item.get('link'))
+            if scraped_img and is_valid_press_image(scraped_img):
+                raw_image_url = scraped_img
+            else:
+                raw_image_url = curated_fallback
+
         watermarked_bytes = apply_chronicles_watermark(raw_image_url)
         if not watermarked_bytes:
-            # Fall back to curated beat image
-            fallback_img = CURATED_BEAT_COVERS.get(editorial.get('category', 'WORLD'), CURATED_BEAT_COVERS['WORLD'])
-            watermarked_bytes = apply_chronicles_watermark(fallback_img)
-            if not watermarked_bytes:
-                logger.warning(f"Could not watermark image or fallback for '{editorial['title'][:35]}'")
-                cover_image_url = raw_image_url
-            else:
-                raw_image_url = fallback_img
+            watermarked_bytes = apply_chronicles_watermark(curated_fallback)
+            raw_image_url = curated_fallback
 
         file_path = f"news/{slug}.jpg"
         if not dry_run:

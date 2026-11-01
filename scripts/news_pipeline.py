@@ -1623,116 +1623,106 @@ def clean_and_format_article_html(html: str) -> str:
     # 3. Fix headings: remove markdown hashes and AI labels (e.g. <h3>## Title</h3>)
     h = re.sub(r'<h3([^>]*)>\s*(?:#{1,4}\s*|(?:Section\s+Heading|Chapter\s+\d+|Section\s+\d+|Part\s+\d+|Heading):\s*)+', r'<h3\1>', h, flags=re.IGNORECASE)
 
-    # 4. Reset any existing figures and unnest blockquotes to avoid cascading borders
-    h = re.sub(r'</?figure\b[^>]*>', '', h, flags=re.IGNORECASE)
-    while re.search(r'<blockquote\b[^>]*>\s*<blockquote\b[^>]*>', h, re.IGNORECASE):
-        h = re.sub(r'<blockquote\b[^>]*>\s*<blockquote\b[^>]*>', '<blockquote>', h, flags=re.IGNORECASE)
-    while re.search(r'</blockquote>\s*</blockquote>', h, re.IGNORECASE):
-        h = re.sub(r'</blockquote>\s*</blockquote>', '</blockquote>', h, flags=re.IGNORECASE)
+    # 4. Unnest nested figures to avoid cascading multi-line borders
+    while re.search(r'<figure\b[^>]*>(?:(?!</figure>)[\s\S])*<figure\b', h, re.IGNORECASE):
+        h = re.sub(
+            r'(<figure\b[^>]*>[\s\S]*?)<figure\b[^>]*>([\s\S]*?)</figure>([\s\S]*?</figure>)',
+            r'\1\2\3',
+            h,
+            flags=re.IGNORECASE
+        )
+    h = re.sub(r'</figure>\s*</figure>', '</figure>', h, flags=re.IGNORECASE)
 
-    # 5. Fix broken blockquote wrappers and stray tags
-    h = re.sub(r'</p>\s*<p>\s*</blockquote>', r'</p></blockquote>', h)
-    h = re.sub(r'<p>\s*</blockquote>', r'</blockquote>', h)
-    h = re.sub(r'</blockquote>\s*<p>\s*</blockquote>', r'</blockquote>', h)
-    h = re.sub(r'</blockquote>\s*<p>(?=\s*<(?:h[1-6]|div|figure|blockquote|table)|$)', r'</blockquote>', h)
+    # 5. Rescue stranded figcaption outside figure
+    while re.search(r'</figure>\s*<figcaption\b([^>]*)>([\s\S]*?)</figcaption>', h, re.IGNORECASE):
+        h = re.sub(
+            r'</figure>\s*<figcaption\b([^>]*)>([\s\S]*?)</figcaption>',
+            r'<figcaption\1>\2</figcaption></figure>',
+            h,
+            flags=re.IGNORECASE
+        )
 
-    # 6. Merge adjacent blockquotes or <p> tags where the second is an attribution (e.g. <blockquote>— Will Packer</blockquote>)
-    adj_bq_regex = re.compile(
-        r'<blockquote\b[^>]*>([\s\S]*?)</blockquote>\s*'
-        r'<blockquote\b[^>]*>\s*(?:<p[^>]*>)?\s*(?:&ldquo;|“|"|\'|‘|\s)*(?:&mdash;|—|-{1,2}|–)\s*([\s\S]*?)\s*(?:&rdquo;|”|"|\'|’|\s)*(?:</p>)?\s*</blockquote>',
+    # 6. Merge adjacent attribution figure or paragraph into preceding figure
+    adj_attr_regex = re.compile(
+        r'(<figure\b[^>]*>\s*<blockquote\b[^>]*>[\s\S]*?</blockquote>\s*)(?:<figcaption\b[^>]*>[\s\S]*?</figcaption>\s*)?</figure>\s*'
+        r'<(?:p|blockquote|figure)[^>]*>(?:\s*<blockquote\b[^>]*>)?\s*(?:<p[^>]*>)?\s*(?:&ldquo;|“|"|\s)*(?:&mdash;|—|-{1,2}|–)\s*([A-Za-z0-9\s.,'"()&/–—-]{3,120}?)\s*(?:&rdquo;|”|"|\s)*(?:</p>)?(?:\s*</blockquote>)?\s*</(?:p|blockquote|figure)>',
         re.IGNORECASE
     )
-    while adj_bq_regex.search(h):
-        def repl_adj_bq(m):
-            q_inner = m.group(1).strip()
-            spk = re.sub(r'</?[a-z0-9]+[^>]*>', '', m.group(2)).strip(' \t\r\n\'"“”’‘-—–.')
-            return f'<blockquote>{q_inner}<footer>{spk}</footer></blockquote>'
-        h = adj_bq_regex.sub(repl_adj_bq, h)
+    def repl_adj_attr(m):
+        fig_head = m.group(1).strip()
+        spk = re.sub(r'^[—–-]+\s*', '', m.group(2).strip().strip('—–- .,'))
+        return f'{fig_head}<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{spk}</span></figcaption></figure>'
 
-    adj_p_regex = re.compile(
-        r'<blockquote\b[^>]*>([\s\S]*?)</blockquote>\s*'
-        r'<p[^>]*>\s*(?:&ldquo;|“|"|\'|‘|\s)*(?:&mdash;|—|-{1,2}|–)\s*([A-Z][a-zA-Z\s.,\'"-]{3,80}?)\s*(?:&rdquo;|”|"|\'|’|\s)*</p>',
+    while adj_attr_regex.search(h):
+        h = adj_attr_regex.sub(repl_adj_attr, h)
+
+    # 7. Protect well-formed <figure> blocks with placeholders
+    fig_blocks = []
+    def save_fig(m):
+        fig_blocks.append(m.group(0))
+        return f'<!--FIG_BLOCK_{len(fig_blocks)-1}-->'
+    h = re.sub(r'<figure\b[\s\S]*?</figure>', save_fig, h, flags=re.IGNORECASE)
+
+    # 8. Transform any remaining bare blockquotes into clean broadsheet figures
+    bare_bq_regex = re.compile(
+        r'<blockquote\b[^>]*>([\s\S]*?)</blockquote>'
+        r'(?:\s*<(?:p|figcaption|footer)[^>]*>\s*(?:&mdash;|—|-{1,2}|–)?\s*([A-Za-z0-9\s.,'"()&/–—-]{3,100}?)\s*</(?:p|figcaption|footer)>)?',
         re.IGNORECASE
     )
-    while adj_p_regex.search(h):
-        def repl_adj_p(m):
-            q_inner = m.group(1).strip()
-            spk = re.sub(r'</?[a-z0-9]+[^>]*>', '', m.group(2)).strip(' \t\r\n\'"“”’‘-—–.')
-            return f'<blockquote>{q_inner}<footer>{spk}</footer></blockquote>'
-        h = adj_p_regex.sub(repl_adj_p, h)
+    def repl_bare_bq(m):
+        inner = m.group(1).strip()
+        trailing_spk = m.group(2) or ""
 
-    # 7. Standardize blockquotes into exactly ONE clean broadsheet pullquote with correct speaker attribution
-    def format_bq_match(match):
-        full_prev = match.group(1)
-        bq_content = match.group(2)
-        speaker = ""
-        footer_match = re.search(r'<(?:footer|figcaption)[^>]*>\s*(?:&mdash;|—|-)?\s*(.*?)\s*</(?:footer|figcaption)>', bq_content, flags=re.IGNORECASE | re.DOTALL)
-        if footer_match:
-            raw_spk = re.sub(r'<[^>]+>', '', footer_match.group(1)).strip('\'"-— \t\r\n')
+        spk = ""
+        foot_match = re.search(r'<(?:footer|figcaption)[^>]*>([\s\S]*?)</(?:footer|figcaption)>', inner, re.IGNORECASE)
+        if foot_match:
+            raw_spk = re.sub(r'<[^>]+>', '', foot_match.group(1)).strip().strip('—–- .,')
+            raw_spk = re.sub(r'^[—–-]+\s*', '', raw_spk).strip()
             if not any(k in raw_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
-                speaker = raw_spk
-            bq_content = re.sub(r'<(?:footer|figcaption)[^>]*>.*?</(?:footer|figcaption)>', '', bq_content, flags=re.IGNORECASE | re.DOTALL)
+                spk = raw_spk
+            inner = re.sub(r'<(?:footer|figcaption)[^>]*>[\s\S]*?</(?:footer|figcaption)>', '', inner, flags=re.IGNORECASE).strip()
+        elif trailing_spk:
+            spk = trailing_spk.strip().strip('—–- .,')
+            spk = re.sub(r'^[—–-]+\s*', '', spk).strip()
 
-        if not speaker:
-            end_spk_match = re.search(r'(?:&mdash;|—|-{1,2}|–)\s*([A-Z][a-zA-Z\s.,\'"-]{3,80})$', bq_content.strip())
-            if end_spk_match:
-                raw_spk = re.sub(r'<[^>]+>', '', end_spk_match.group(1)).strip(' \t\r\n\'"“”’‘-—–.')
-                if not any(k in raw_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']) and len(raw_spk) > 2:
-                    speaker = raw_spk
-                    bq_content = bq_content[:end_spk_match.start()].strip()
-
-        if not speaker and full_prev:
-            prev_chunk = full_prev[-450:]
-            m_role = re.search(r'([A-Z][a-zA-Z\s.\'-]{2,35})\s*\(([^)]+)\)\s*:', prev_chunk)
-            if m_role:
-                name = m_role.group(1).strip()
-                role = m_role.group(2).strip()
-                if not any(k in name.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial', 'section', 'part', 'chapter']):
-                    speaker = f"{name}, {role}"
-            else:
-                m_said1 = re.search(r'([A-Z][a-zA-Z\s.\'-]{2,35})\s*,\s*([^<.,\n]+?)\s*,\s*(?:said|stated|remarked|declared|noted|explained|added)\b', prev_chunk, re.IGNORECASE)
-                if m_said1:
-                    name = m_said1.group(1).strip()
-                    role = m_said1.group(2).strip()
-                    if not any(k in name.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
-                        speaker = f"{name}, {role}"
-                else:
-                    m_said2 = re.search(r'(?:said|stated|remarked|declared|noted|warned|explained)\s+([A-Z][a-zA-Z\s.\'-]{2,35})(?:\s*,\s*([^<.,\n]+))?', prev_chunk, re.IGNORECASE)
-                    if m_said2:
-                        name = m_said2.group(1).strip()
-                        role = m_said2.group(2).strip() if m_said2.group(2) else ""
-                        if not any(k in name.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
-                            speaker = f"{name}, {role}" if role else name
-
-        quote_text = re.sub(r'<\/?(?:p|blockquote|footer|figcaption|span)[^>]*>', '', bq_content).strip()
-        quote_text = re.sub(r'<p>\s*<\/p>', '', quote_text).strip()
+        quote_text = re.sub(r'</?(?:p|blockquote)[^>]*>', '', inner).strip()
         quote_text = re.sub(r'^(?:&ldquo;|“|"|\'|‘|\s)+|(?:&rdquo;|”|"|\'|’|\s)+$', '', quote_text).strip()
-        quote_text = re.sub(r'[,;]\.([”"’\'])', r'.\1', quote_text)
-        quote_text = re.sub(r'\.[,;]([”"’\'])', r'.\1', quote_text)
-        quote_text = re.sub(r'([.,;!?])[.,;!?]+', r'\1', quote_text)
-        if quote_text and not quote_text.endswith(('.', '!', '?')):
+        if not quote_text or re.match(r'^(?:&mdash;|—|-{1,2}|–)\s*[A-Z]', quote_text):
+            return ""
+        if not quote_text.endswith(('.', '!', '?')):
             quote_text += '.'
 
-        # Discard isolated attribution blockquote that has no quote content
-        if not quote_text or re.match(r'^(?:&mdash;|—|-{1,2}|–)\s*[A-Z]', quote_text):
-            return full_prev
+        fig_cap = f'<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{spk}</span></figcaption>' if spk else ''
+        return f'<figure class="my-8 py-5 px-6 border-l-4 border-[#E50914] bg-[#161616]/90 rounded-r-xs shadow-md"><blockquote class="font-editorial italic text-stone-100 text-lg sm:text-xl leading-relaxed border-none pl-0 m-0">&ldquo;{quote_text}&rdquo;</blockquote>{fig_cap}</figure>'
 
-        fig_cap = f'<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{speaker}</span></figcaption>' if speaker else ''
-        return f'{full_prev}<figure class="my-8 py-5 px-6 border-l-4 border-[#E50914] bg-[#161616]/90 rounded-r-xs shadow-md"><blockquote class="font-editorial italic text-stone-100 text-lg sm:text-xl leading-relaxed border-none pl-0 m-0">&ldquo;{quote_text}&rdquo;</blockquote>{fig_cap}</figure>'
+    h = bare_bq_regex.sub(repl_bare_bq, h)
 
-    h = re.sub(r'([\s\S]{0,450})<blockquote\b[^>]*>(.*?)<\/blockquote>', format_bq_match, h, flags=re.IGNORECASE | re.DOTALL)
+    # 9. Restore protected figures
+    h = re.sub(r'<!--FIG_BLOCK_(\d+)-->', lambda m: fig_blocks[int(m.group(1))], h)
 
-    # 5. Convert ASCII and Markdown tables into responsive broadsheet tables
-    p_pattern = re.compile(
-        r'(?:<p>\s*([A-Z0-9\s()&;:/\.,\'\"-]{4,90})\s*<\/p>\s*)?'
-        r'((?:<p>\s*(?:\+[-+]+\+|\|(?:(?!<\/p>)[\s\S])+)\s*<\/p>\s*){2,})',
+    # 10. Clean quote spacing inside all figures and blockquotes
+    h = re.sub(r'&ldquo;\s+', '&ldquo;', h)
+    h = re.sub(r'\s+&rdquo;', '&rdquo;', h)
+    h = re.sub(r'“\s+', '“', h)
+    h = re.sub(r'\s+”', '”', h)
+    h = re.sub(r'(<blockquote\b[^>]*>(?:&ldquo;|“|"))\s+([A-Za-z])', r'\1\2', h, flags=re.IGNORECASE)
+
+    # 11. Protect well-formed broadsheet tables
+    tbl_blocks = []
+    def save_tbl(m):
+        tbl_blocks.append(m.group(0))
+        return f'<!--TBL_BLOCK_{len(tbl_blocks)-1}-->'
+    h = re.sub(r'<div\b[^>]*overflow-x-auto[\s\S]*?</table>\s*</div>', save_tbl, h, flags=re.IGNORECASE)
+
+    # 12. Convert ASCII, Unicode diagrams, and Markdown tables into responsive broadsheet tables
+    table_block_regex = re.compile(
+        r'(?:<p>\s*([A-Za-z0-9\s()&;:/\.,'"-]{4,90})\s*<\/p>\s*)?'
+        r'((?:<p>\s*(?:[+┌└├▼][-+═─│|\s►•₦X]+|[│|](?:(?!<\/p>)[\s\S])+)\s*<\/p>\s*){2,})',
         re.IGNORECASE
     )
-
-    def replace_table_block(m):
-        pre_title = m.group(1)
+    def repl_ascii_table(m):
+        pre_title = m.group(1) or ""
         raw_block = m.group(2)
-
         if pre_title:
             pt_clean = pre_title.strip()
             if len(pt_clean.split()) > 12 or pt_clean.endswith('.'):
@@ -1745,30 +1735,31 @@ def clean_and_format_article_html(html: str) -> str:
             lead_html = ''
             title = None
 
-        raw_lines = re.findall(r'<p>\s*(.*?)\s*<\/p>', raw_block)
+        lines = re.findall(r'<p>\s*(.*?)\s*<\/p>', raw_block)
         rows = []
         is_diagram = False
 
-        for line in raw_lines:
-            l = line.strip()
-            if re.match(r'^\+[-+=]+\+$', l) or re.match(r'^\|[-+=|]+\|$', l):
+        for l in lines:
+            l_str = l.strip()
+            if re.match(r'^[+┌└├▼][-+═─│|\s]+[+┐┘┤]?$', l_str) or re.match(r'^\+[-+=]+\+$', l_str) or re.match(r'^[│|][-+=|│]+[│|]$', l_str):
                 continue
-            if '<---' in l or '--->' in l or re.search(r'\s+\^\s+', l):
+            if '<---' in l_str or '--->' in l_str or '──►' in l_str or re.search(r'\s+\^\s+', l_str):
                 is_diagram = True
 
-            if l.startswith('|') and l.endswith('|'):
-                inner = l[1:-1]
-                cols = [c.strip() for c in inner.split('|')]
-                rows.append(cols)
-            elif l.startswith('|'):
-                inner = l[1:]
-                cols = [c.strip() for c in inner.split('|')]
-                rows.append(cols)
+            if (l_str.startswith('|') or l_str.startswith('│')) and (l_str.endswith('|') or l_str.endswith('│')):
+                inner = l_str[1:-1]
+                rows.append([c.strip(' │|•\t') for c in re.split(r'[│|]', inner) if c.strip(' │|•\t')])
+            elif l_str.startswith('|') or l_str.startswith('│'):
+                rows.append([c.strip(' │|•\t') for c in re.split(r'[│|]', l_str[1:]) if c.strip(' │|•\t')])
             else:
-                rows.append([l])
+                parts = [c.strip(' │|•\t') for c in re.split(r'\s*[│|]\s*(?:──►\s*)?[│|]?\s*', l_str) if c.strip(' │|•\t')]
+                if len(parts) > 1:
+                    rows.append(parts)
+                else:
+                    rows.append([l_str])
 
         if not rows:
-            return m.group(0)
+            return raw_block
 
         if len(rows[0]) == 1 and not title:
             cand = rows[0][0].strip(' -*•')
@@ -1776,56 +1767,47 @@ def clean_and_format_article_html(html: str) -> str:
                 title = cand
                 rows = rows[1:]
 
-        if not rows:
-            return m.group(0)
+        if not rows or len(rows) < 2:
+            return raw_block
 
-        if is_diagram:
-            raw_text = '\n'.join([re.sub(r'^\||\|$', '', l.strip()) for l in raw_lines if not re.match(r'^\+[-+=]+\+$', l.strip())])
-            title_html = f'<div class="p-3 font-editorial font-bold text-stone-200 uppercase tracking-wider bg-[#1B1B1B] border-b border-[#2D2D2D]">{title}</div>' if title else ''
-            return f'{lead_html}<div class="my-6 border border-[#2D2D2D] rounded-xs bg-[#161616] overflow-hidden">{title_html}<pre class="p-4 overflow-x-auto font-mono text-xs sm:text-sm text-stone-300 leading-relaxed bg-[#111111]">{raw_text}</pre></div>'
+        title_str = title if title else "DATA MATRIX / DISPATCH"
+        title_html = f'<div class="bg-[#1C1C1C] border-b border-[#2D2D2D] px-4 py-3 flex items-center justify-between"><div class="font-editorial font-bold text-xs sm:text-sm text-stone-100 uppercase tracking-wider flex items-center gap-2"><span class="w-2.5 h-2.5 bg-[#E50914] inline-block shrink-0 rounded-full"></span><span>{title_str}</span></div><span class="text-[10px] font-mono-meta text-stone-500 uppercase tracking-widest">DATA MATRIX / DISPATCH</span></div>'
 
-        col_counts = [len(r) for r in rows]
-        max_cols = max(col_counts)
-
-        if max_cols == 1:
-            title_html = f'<div class="p-3 font-editorial font-bold text-stone-200 uppercase tracking-wider bg-[#1B1B1B] border-b border-[#2D2D2D]">{title}</div>' if title else ''
-            items_html = []
-            for r in rows:
-                val = r[0].strip(' -*•')
-                if val:
-                    items_html.append(f'<div class="py-2.5 px-4 border-b border-[#262626] last:border-b-0 flex items-start gap-2.5"><span class="text-[#E50914] font-bold mt-0.5">&bull;</span><span class="text-stone-300 text-xs sm:text-sm font-sans-body">{val}</span></div>')
-            return f'{lead_html}<div class="my-6 border border-[#2D2D2D] rounded-xs bg-[#161616] overflow-hidden">{title_html}<div class="divide-y divide-[#222222]">{" ".join(items_html)}</div></div>'
-
-        header_row = rows[0]
+        headers = rows[0]
         data_rows = rows[1:]
+        max_cols = max(len(r) for r in rows)
 
-        caption_html = f'<caption class="p-3 text-left font-editorial font-bold text-stone-200 uppercase tracking-wider bg-[#1B1B1B] border-b border-[#2D2D2D]">{title}</caption>' if title else ''
-        th_cells = ''.join([f'<th class="py-2.5 px-4 font-semibold uppercase tracking-wider border-r border-[#262626] last:border-r-0">{c}</th>' for c in header_row])
-        thead_html = f'<thead class="bg-[#1F1F1F] text-[#E50914] font-bold border-b border-[#2D2D2D]"><tr>{th_cells}</tr></thead>'
+        th_html = "".join([f'<th class="py-2.5 px-4 font-semibold uppercase tracking-wider text-[#E50914] border-r border-[#262626] last:border-r-0 bg-[#1F1F1F]">{h_col}</th>' for h_col in headers])
+        thead = f'<thead><tr>{th_html}</tr></thead>'
+        tr_html = []
+        for r in data_rows:
+            while len(r) < max_cols:
+                r.append('')
+            td_html = "".join([f'<td class="py-2.5 px-4 border-r border-[#222222] last:border-r-0 text-stone-300 font-sans-body text-xs sm:text-sm">{c}</td>' for c in r])
+            tr_html.append(f'<tr class="hover:bg-[#1E1E1E]/60 transition-colors odd:bg-[#161616] even:bg-[#191919]">{td_html}</tr>')
+        tbody = f'<tbody class="divide-y divide-[#262626]">{"".join(tr_html)}</tbody>'
+        return f'{lead_html}<div class="my-6 sm:my-8 overflow-x-auto border border-[#2D2D2D] rounded-xs bg-[#161616] shadow-md">{title_html}<table class="w-full text-left font-mono-meta text-xs sm:text-sm border-collapse m-0">{thead}{tbody}</table></div>'
 
-        tr_list = []
-        for row in data_rows:
-            while len(row) < max_cols:
-                row.append('')
-            td_cells = ''.join([f'<td class="py-2.5 px-4 border-r border-[#222222] last:border-r-0">{c}</td>' for c in row])
-            tr_list.append(f'<tr class="hover:bg-[#1E1E1E]/60 transition-colors odd:bg-[#161616] even:bg-[#191919]">{td_cells}</tr>')
-        tbody_html = f'<tbody class="divide-y divide-[#262626] text-stone-300 font-mono-meta text-xs sm:text-sm">{"".join(tr_list)}</tbody>'
+    h = table_block_regex.sub(repl_ascii_table, h)
 
-        return f'{lead_html}<div class="my-6 overflow-x-auto border border-[#2D2D2D] rounded-xs bg-[#161616] shadow-md"><table class="w-full text-left font-mono-meta text-xs sm:text-sm border-collapse">{caption_html}{thead_html}{tbody_html}</table></div>'
+    # 13. Strip orphan ASCII separator paragraphs
+    h = re.sub(r'<p>\s*[+┌└├▼][-+═─│|\s►•₦X]+[+┐┘┤]?\s*</p>', '', h, flags=re.IGNORECASE)
+    h = re.sub(r'<p>\s*\+[-=+]+\+\s*</p>', '', h, flags=re.IGNORECASE)
 
-    h = p_pattern.sub(replace_table_block, h)
+    # 14. Restore protected tables
+    h = re.sub(r'<!--TBL_BLOCK_(\d+)-->', lambda m: tbl_blocks[int(m.group(1))], h)
 
-    # 6. Spacing fixes after punctuation
+    # 15. Spacing fixes after punctuation
     h = re.sub(r'([a-z0-9])\.([A-Z])', r'\1. \2', h)
     h = re.sub(r'([a-zA-Z0-9]),([a-zA-Z])', r'\1, \2', h)
     h = re.sub(r'([a-zA-Z0-9]):([A-Z])', r'\1: \2', h)
     h = re.sub(r'([a-zA-Z0-9]);([a-zA-Z])', r'\1; \2', h)
 
-    # 7. Convert ASCII workflow arrows (+--->) into broadsheet callouts
+    # 16. Convert ASCII workflow arrows (+--->) into broadsheet callouts
     h = re.sub(r'<p>\s*\+--+>\s*(.*?)\s*<\/p>', r'<div class="my-2 py-2 px-3.5 border-l-2 border-[#E50914] bg-[#161616] text-stone-300 text-xs sm:text-sm flex items-center gap-2.5 rounded-r-xs"><span class="text-[#E50914] font-bold">&rarr;</span><span>\1</span></div>', h)
 
-    # 8. Clean up redundant empty tags and residual paragraph wrappers
-    h = re.sub(r'<p>\s*<\/p>', '', h)
+    # 17. Clean up redundant empty tags and residual paragraph wrappers
+    h = re.sub(r'<p>\s*</p>', '', h)
     h = re.sub(r'<p>\s*(<(?:figure|div|table|h[1-6]|ul|ol|pre)\b)', r'\1', h)
     h = re.sub(r'(<\/(?:figure|div|table|h[1-6]|ul|ol|pre)>)\s*<\/p>', r'\1', h)
 

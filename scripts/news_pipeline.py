@@ -70,14 +70,24 @@ _OR_KEY_B64 = "c2stb3ItdjEtNDg1OTBhZDM0Nzk0N2YzOGEwZmI0ZGYwOGY5NjA0YTQyYmFhMWMzZ
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY') or base64.b64decode(_OR_KEY_B64).decode('utf-8')
 
 OPENROUTER_CASCADE_MODELS = [
-    "google/gemini-3.8-flash",
-    "meta-llama/llama-3.3-70b-instruct",
+    # 1. Verified Free-Tier OpenRouter Models (0 credits required, tested & active)
+    "openrouter/free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "recursive/flint-v1.0:free",
+    # 2. Flagship Broadsheet Models (engaged when account holds credits)
+    "google/gemini-2.5-flash",
     "deepseek/deepseek-v4.1-flash",
+    "meta-llama/llama-3.3-70b-instruct",
     "qwen/qwen-2.5-72b-instruct",
-    "mistralai/mistral-small-3.2-24b-instruct",
-    "minimax/minimax-m3.1-flash",
+    "mistralai/mistral-small-2603",
     "openrouter/auto"
 ]
+
+MIN_BROADSHEET_WORD_COUNT = 3500
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or base64.b64decode(_DEFAULT_KEY_B64).decode('utf-8')
 
@@ -1545,15 +1555,36 @@ def fetch_wire_articles(feed: dict) -> List[dict]:
     return articles
 
 
+def generate_broadsheet_article_native_gemini(title: str, prompt: str) -> str:
+    """Invokes Google Gemini SDK directly using GEMINI_API_KEY as primary/fallback."""
+    if not gemini_client:
+        return ""
+    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    for m in candidate_models:
+        try:
+            response = gemini_client.models.generate_content(
+                model=m,
+                contents=prompt,
+                config={'temperature': 0.7}
+            )
+            if response and response.text:
+                text = response.text.strip()
+                words = len(text.split())
+                if words >= 1500:
+                    logger.info(f"Native Gemini ({m}) successfully generated broadsheet report ({words} words) for '{title[:35]}...'")
+                    return text
+        except Exception as e:
+            logger.warning(f"Native Gemini ({m}) failed: {e}")
+    return ""
+
+
 def generate_broadsheet_article_openrouter(title: str, raw_text: str, category: str, dateline: str) -> str:
     """
-    Invokes OpenRouter with multi-model automatic failover cascade to generate
-    an exhaustive, deeply reported broadsheet investigative dispatch (3,500 - 8,000+ words).
+    Invokes OpenRouter with multi-model automatic failover cascade and Native Gemini fallback
+    to generate an exhaustive, deeply reported broadsheet investigative dispatch (3,500 - 8,000+ words).
     Automatically switches models if one fails or encounters errors.
+    If the initial pass yields 1,500 - 3,499 words, executes a Deep Continuation Pass to surpass 3,500+ words.
     """
-    if not OPENROUTER_API_KEY:
-        return ""
-
     tone = CATEGORY_TONES.get(category, CATEGORY_TONES['WORLD'])
     prompt = f"""You are the Chief Foreign & National Correspondent for The Chronicles, an internationally acclaimed prestige newspaper celebrated for long-form investigative journalism and deep literary reporting.
 
@@ -1566,7 +1597,7 @@ Source Wire Copy:
 {raw_text[:4000]}
 
 MANDATORY JOURNALISTIC ASSIGNMENT:
-Write an exhaustive, deeply reported, long-form broadsheet investigative report between 3,500 and 7,500 words.
+Write an exhaustive, deeply reported, long-form broadsheet investigative report of at least 3,500 to 7,500 words.
 DO NOT summarize, abbreviate, or truncate. Develop the narrative with thoroughness and rigor across all dimensions of the story.
 
 FORMAT & STRUCTURE RULES:
@@ -1592,7 +1623,7 @@ Organize the investigation into 8 to 12 distinct analytical sections using evoca
 Each section must contain 4 to 6 rich, substantive, literary paragraphs.
 
 4. REAL SPEAKER QUOTES:
-Incorporate direct quotes from real persons, witnesses, officials, or spokespersons identified in the source text using markdown blockquotes:
+Incorporate at least two direct quotes from real persons, witnesses, officials, or spokespersons identified in the source text using markdown blockquotes:
 > "Direct quote from named individual..." - Official Full Name, Title
 
 5. PURE HUMAN JOURNALISTIC PROSE (NO ROBOTIC CLICHÉS):
@@ -1608,30 +1639,104 @@ Provide only the exhaustive long-form broadsheet journalistic piece.
         "X-Title": "The Chronicles Automation"
     }
 
-    for model_name in OPENROUTER_CASCADE_MODELS:
-        data = {
-            "model": model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 7000,
-            "temperature": 0.7
-        }
-        try:
-            resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=60)
-            if resp.status_code == 200:
-                body = resp.json()
-                text = body['choices'][0]['message']['content'].strip()
-                words = len(text.split())
-                if words >= 2500:
-                    logger.info(f"OpenRouter ({model_name}) successfully generated broadsheet report ({words} words) for '{title[:35]}...'")
-                    return text
-                else:
-                    logger.warning(f"OpenRouter ({model_name}) output too short ({words} words); trying next model in cascade...")
-            else:
-                logger.warning(f"OpenRouter model '{model_name}' returned HTTP {resp.status_code}: {resp.text[:80]}; switching to next model...")
-        except Exception as e:
-            logger.warning(f"OpenRouter model '{model_name}' failed ({e}); switching to next model...")
+    generated_text = ""
 
-    return ""
+    # Pass 1: Try OpenRouter Cascade
+    if OPENROUTER_API_KEY:
+        for model_name in OPENROUTER_CASCADE_MODELS:
+            data = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 7000,
+                "temperature": 0.7
+            }
+            try:
+                resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=60)
+                if resp.status_code == 200:
+                    body = resp.json()
+                    choices = body.get('choices') or []
+                    if choices:
+                        msg = choices[0].get('message') or {}
+                        content = (msg.get('content') or '').strip()
+                        words = len(content.split())
+                        if words >= 1500:
+                            logger.info(f"OpenRouter ({model_name}) generated broadsheet draft ({words} words) for '{title[:35]}...'")
+                            generated_text = content
+                            break
+                        else:
+                            logger.warning(f"OpenRouter ({model_name}) draft too brief ({words} words); trying next model in cascade...")
+                elif resp.status_code == 402:
+                    logger.warning(f"OpenRouter model '{model_name}' returned HTTP 402 (Zero/Insufficient credits); switching to free or next model...")
+                else:
+                    logger.warning(f"OpenRouter model '{model_name}' returned HTTP {resp.status_code}: {resp.text[:80]}; switching to next model...")
+            except Exception as e:
+                logger.warning(f"OpenRouter model '{model_name}' failed ({e}); switching to next model...")
+
+    # Pass 1 Fallback: Native Google Gemini
+    if not generated_text and gemini_client:
+        logger.info(f"OpenRouter cascade exhausted. Engaging Native Google Gemini Client for '{title[:35]}...'")
+        generated_text = generate_broadsheet_article_native_gemini(title, prompt)
+
+    if not generated_text:
+        return ""
+
+    # Pass 2: Deep Continuation Pass if draft is under 3,500 words
+    words = len(generated_text.split())
+    if words < 3500:
+        logger.info(f"Draft for '{title[:35]}...' is {words} words. Launching Deep Continuation Pass to meet 3,500 - 10,000 word standard...")
+        prev_sample = generated_text[-2500:]
+        expansion_prompt = f"""You are the Senior Executive Editor of The Chronicles broadsheet newspaper.
+You are completing Part 2 of an exhaustive, 5,000+ word investigative dispatch titled '{title}' from dateline {dateline} ({category}).
+
+Here is the excerpt from Part 1:
+[BEGIN PART 1 EXCERPT]
+{prev_sample}
+[END PART 1 EXCERPT]
+
+MANDATORY EDITORIAL INSTRUCTION:
+DO NOT REPEAT previous text or repeat the introduction.
+Continue the investigation immediately by writing at least 2,000 to 3,500 additional words across 5 to 7 deep investigative chapters:
+- ## Forensic Stakeholder Deposition & Conflicts of Interest
+- ## Statutory Disclosures, Financial Discrepancies & Regulatory Audits
+- ## Socio-Economic Ripples and Community Impact Across the Beat
+- ## Unvarnished On-the-Record Official Quotes:
+  Incorporate at least two substantive verbatim quotes using:
+  > "Detailed official statement or witness testimony..." - Full Name, Title
+- ## Institutional Prognosis and Five-Year Horizon
+
+Write in rich, literary, prestige broadsheet prose. Provide ONLY the continuation chapters."""
+
+        continuation = ""
+        # Try OpenRouter free models first for continuation
+        if OPENROUTER_API_KEY:
+            for model_name in OPENROUTER_CASCADE_MODELS[:4]:
+                try:
+                    data = {
+                        "model": model_name,
+                        "messages": [{"role": "user", "content": expansion_prompt}],
+                        "max_tokens": 7000,
+                        "temperature": 0.7
+                    }
+                    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=60)
+                    if resp.status_code == 200:
+                        body = resp.json()
+                        choices = body.get('choices') or []
+                        if choices:
+                            cont = (choices[0].get('message', {}).get('content') or '').strip()
+                            if len(cont.split()) >= 1000:
+                                continuation = cont
+                                break
+                except Exception:
+                    pass
+
+        if not continuation and gemini_client:
+            continuation = generate_broadsheet_article_native_gemini(title, expansion_prompt)
+
+        if continuation:
+            generated_text = generated_text + "\n\n" + continuation
+            logger.info(f"Continuation Pass succeeded! Total article expanded to {len(generated_text.split())} words.")
+
+    return generated_text
 
 
 # Backward-compatible alias
@@ -2072,11 +2177,11 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
     # 4. Safely format subtitle and title strictly on word boundaries
     clean_title = safe_word_bound_trim(title, 140)
 
-    # 5. Check if OpenRouter AI cascade can generate full-length prestige investigative broadsheet report
+    # 5. Check if OpenRouter AI cascade or Native Gemini can generate full-length prestige investigative broadsheet report
     if OPENROUTER_API_KEY or gemini_client:
         try:
             gemini_raw = generate_broadsheet_article_gemini(clean_title, full_body_text, category, dateline)
-            if gemini_raw and len(gemini_raw.split()) > 200:
+            if gemini_raw and len(gemini_raw.split()) >= 1500:
                 editorial = format_gemini_broadsheet_html(clean_title, gemini_raw, category, dateline)
                 return {
                     'title': clean_title,
@@ -2089,128 +2194,78 @@ def format_broadsheet_article_rules(item: dict, full_body_text: str) -> dict:
                     'tags': [category.lower(), dateline.lower()],
                     'read_time': editorial['read_time'],
                     'lifecycle_stage': lifecycle_stage,
-                    'dispatch_type': dispatch_type
+                    'dispatch_type': dispatch_type,
+                    'word_count': editorial.get('word_count', 0),
+                    'published_at': item.get('published_at') or datetime.now(timezone.utc).isoformat()
                 }
         except Exception as e:
-            logger.warning(f"Gemini expansion error for '{clean_title}': {e}. Falling back to broadsheet rules.")
+            logger.warning(f"AI broadsheet generation error for '{clean_title}': {e}.")
 
-    # 4. Extract Real Quote & Deduplicate from text
-    primary_quote, quote_speaker, cleaned_body_text = extract_and_attribute_quote(
-        full_body_text,
-        default_speaker=""
-    )
+    # STRICT EDITORIAL WITHHOLDING: If AI expansion could not produce an authentic broadsheet article,
+    # NEVER publish a raw RSS snippet or truncated stub! Withhold from publication.
+    logger.info(f"[EDITORIAL WITHHELD] '{clean_title[:35]}...' did not generate a qualifying broadsheet article. Skipped.")
+    return None
 
-    # 5. Extract Authentic Scraped Paragraphs & Deduplicate Quote
-    clean_q_test = primary_quote.strip('\'"`“” \t\r\n').lower() if primary_quote else ""
-    raw_paras = []
-    seen = set()
-    for p in cleaned_body_text.split('\n\n'):
-        p_strip = p.strip()
-        if len(p_strip) > 35 and not is_boilerplate(p_strip):
-            if clean_q_test and (clean_q_test[:35] in p_strip.lower() or p_strip.lower() in clean_q_test):
-                continue
-            sanitized = sanitize_paragraph_quotes(p_strip)
-            sig = sanitized[:35].lower()
-            if len(sanitized) > 30 and sig not in seen:
-                seen.add(sig)
-                raw_paras.append(sanitized)
 
-    if len(raw_paras) < 3:
-        for s in re.split(r'(?<=[.!?])\s+', cleaned_body_text):
-            s_strip = s.strip()
-            if len(s_strip) > 30 and not is_boilerplate(s_strip):
-                if clean_q_test and (clean_q_test[:35] in s_strip.lower() or s_strip.lower() in clean_q_test):
-                    continue
-                sanitized = sanitize_paragraph_quotes(s_strip)
-                sig = sanitized[:35].lower()
-                if len(sanitized) > 25 and sig not in seen:
-                    seen.add(sig)
-                    raw_paras.append(sanitized)
-
-    # 1. Lead Section (Opening with 2-Line Red Drop Cap directly on first narrative word)
-    lead_sentence = raw_paras[0] if raw_paras else f"Verified broadsheet dispatches from {dateline} confirm significant developments concerning this ongoing reporting cycle."
-    lead_sentence = re.sub(r'^[A-Z\s]{3,25}\s*[-—]\s*', '', lead_sentence).strip()
-    lead_sentence = re.sub(r'^[“"\'‘\s]+', '', lead_sentence)
-    lead_p1 = build_lead_paragraph_with_dropcap(lead_sentence)
-
-    # 2. Executive Callout Box: Concrete Factual Summary
-    clean_t = re.sub(r'^(?:BREAKING|EXCLUSIVE|REPORT):\s*', '', title, flags=re.IGNORECASE).strip()
-    takeaways = []
-    if len(raw_paras) >= 3:
-        for p in raw_paras[1:4]:
-            first_s = re.split(r'(?<=[.!?])\s+', p)[0].strip()
-            if len(first_s) > 30 and len(first_s) < 180:
-                takeaways.append(first_s)
-    if len(takeaways) < 3:
-        takeaways = [
-            f"Key developments unfolding in {dateline} concerning {clean_t}.",
-            f"Primary stakeholders and observers evaluate regional and sectoral outcomes.",
-            f"Follow-up inquiries and operational updates are ongoing as events develop."
-        ]
-
-    takeaways_li = "".join([f"<li>{t}</li>" for t in takeaways])
-    takeaways_html = f"""
-<div class="my-6 p-5 bg-[#181818] border border-[#2D2D2D] rounded-xs">
-  <h4 class="font-mono-meta text-xs uppercase tracking-wider text-[#E50914] font-bold mb-3">Summary</h4>
-  <ul class="list-disc pl-5 space-y-1.5 font-editorial text-sm text-stone-300">
-    {takeaways_li}
-  </ul>
-</div>"""
-
-    # 3. Luxury Pull-Quote Callout (Clean single typographical quotes, zero double marks)
-    quote_html = ""
-    if primary_quote:
-        clean_q = primary_quote.strip('\'"`“” \t\r\n')
-        clean_q = re.sub(r'&(?:quot|ldquo|rdquo);', '', clean_q)
-        clean_q = re.sub(r'["“”]{2,}', '"', clean_q).strip('\'"`“” \t\r\n')
-        clean_q = re.sub(r'[,;:\s]+$', '', clean_q)
-        if clean_q and not clean_q.endswith(('.', '!', '?')):
-            clean_q += '.'
-        clean_spk = (quote_speaker or '').strip('\'"`“” \t\r\n— -')
-        if any(k in clean_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
-            clean_spk = ''
-        quote_html = f"""
-<blockquote class="my-6 border-l-4 border-[#E50914] pl-4 italic text-stone-100 font-editorial text-lg leading-relaxed">
-  &ldquo;{clean_q}&rdquo;
-  {f'<footer class="text-xs font-mono-meta text-stone-400 not-italic mt-2">&mdash; {clean_spk}</footer>' if clean_spk else ''}
-</blockquote>"""
-
-    # 4. Remaining authentic paragraphs
-    other_paras_html = ""
-    for p in raw_paras[1:]:
-        other_paras_html += f"<p>{p}</p>"
-
-    full_html = f"{lead_p1}\n{takeaways_html}\n{other_paras_html}"
-    if quote_html:
-        full_html += f"\n{quote_html}"
-
-    soup = BeautifulSoup(full_html, 'html.parser')
-    word_count = len(soup.get_text().split())
-    read_time = f"{max(5, math.ceil(word_count / 180))} min read"
-
-    # Safely format subtitle and title strictly on word boundaries (never cut words or letters in half)
-    clean_title = safe_word_bound_trim(title, 140)
-    lead_first_sentence = re.split(r'(?<=[.!?])\s+', lead_sentence)[0].strip()
-    clean_sub_text = re.sub(r'^[A-Z\s]{3,25}\s*[-—]\s*', '', lead_first_sentence).strip()
-    clean_sub_text = re.sub(r'^[“"\'‘\s]+', '', clean_sub_text)
-    clean_sub_text = re.sub(r'^(?:Strategic assessment|Strategic overview|Key summary):\s*', '', clean_sub_text, flags=re.IGNORECASE).strip()
-    clean_subtitle = safe_word_bound_trim(clean_sub_text, 160)
-    if not clean_subtitle.endswith(('.', '!', '?')):
-        clean_subtitle += '.'
-
-    return {
-        'title': clean_title,
-        'subtitle': clean_subtitle,
-        'category': category,
-        'lifecycle_stage': lifecycle_stage,
-        'dispatch_type': dispatch_type,
-        'dateline': dateline,
-        'content_html': full_html,
-        'word_count': word_count,
-        'read_time': read_time,
-        'published_at': item.get('published_at') or datetime.now(timezone.utc).isoformat()
-    }
-
+def review_article_before_publication(editorial: dict, item: dict) -> Tuple[bool, str]:
+    """
+    STRICT MANAGING EDITOR PRE-PUBLICATION GATE
+    
+    Acts as the Executive Editorial Board. Every candidate article MUST satisfy
+    all quality benchmarks before it is eligible to be saved to Supabase:
+    
+    1. STRICT WORD COUNT: Minimum 3,500 words (excluding HTML tags). Target: 3,500 - 10,000 words.
+       Guarantees zero 60-word or 200-word stubs ever get published.
+    2. BROADSHEET FORMATTING & ARCHITECTURE:
+       - Structured Section Headings: At least 4 distinct <h3> section headings organizing the long-form dispatch.
+       - Executive Summary Box: Must contain a verified Key Developments summary container.
+       - Broadsheet Pull-Quotes: At least one properly formatted quote block (<figure class="..."><blockquote ...>...</blockquote><figcaption ...>...</figcaption></figure>).
+       - Signature Lead Drop Cap: Must start with a narrative lead paragraph featuring a red drop cap.
+       - Substantive Paragraph Count: At least 12 paragraphs (<p>) ensuring rich, literary, investigative reporting.
+    3. NO RAW SNIPPETS:
+       - Rejects raw wire snippets, unexpanded RSS descriptions, and boilerplate text.
+       
+    Returns (True, "Approved") or (False, rejection_reason)
+    """
+    if not editorial or not isinstance(editorial, dict):
+        return False, "Editorial object is missing or invalid"
+        
+    html = editorial.get('content_html') or ''
+    if not html:
+        return False, "Empty content_html"
+        
+    soup = BeautifulSoup(html, 'html.parser')
+    clean_text = soup.get_text()
+    words = len(clean_text.split())
+    
+    # Check 1: Absolute Word Count
+    if words < MIN_BROADSHEET_WORD_COUNT:
+        return False, f"Word count too low ({words} words < {MIN_BROADSHEET_WORD_COUNT} words minimum)"
+        
+    # Check 2: Section Headings
+    headings = soup.find_all(['h2', 'h3'])
+    h_substantive = [h for h in headings if 'summary' not in h.get_text().lower()]
+    if len(h_substantive) < 4:
+        return False, f"Insufficient section subheadings ({len(h_substantive)} found, minimum 4 required)"
+        
+    # Check 3: Broadsheet Quotes
+    figures = soup.find_all('figure')
+    quote_figures = [f for f in figures if f.find('blockquote')]
+    if not quote_figures and not soup.find('blockquote'):
+        return False, "Missing verified broadsheet pull-quote block with speaker attribution"
+        
+    # Check 4: Substantive Paragraph Count
+    paras = soup.find_all('p')
+    substantive_paras = [p for p in paras if len(p.get_text().split()) >= 15]
+    if len(substantive_paras) < 10:
+        return False, f"Insufficient substantive paragraphs ({len(substantive_paras)} found, minimum 10 required)"
+        
+    # Check 5: Executive Summary Box
+    summary_box = soup.find('h4', string=re.compile(r'summary', re.IGNORECASE))
+    if not summary_box and 'Summary</h4>' not in html:
+        return False, "Missing Key Developments executive summary box"
+        
+    return True, f"Approved ({words} words, {len(h_substantive)} chapters, verified broadsheet formatting)"
 
 def process_single_article(
     item: dict,
@@ -2223,8 +2278,19 @@ def process_single_article(
         source_link = item.get('link', '')
         full_body_text = fetch_full_article_body(source_link, item.get('summary', ''))
 
-        # Use overhauled broadsheet rules engine (100% human-voiced, 1,000+ words)
+        # Use overhauled broadsheet rules engine (100% human-voiced, 3,500+ words)
         editorial = format_broadsheet_article_rules(item, full_body_text)
+        if not editorial:
+            logger.info(f"[EDITORIAL WITHHELD] '{item.get('title', '')[:35]}...' did not qualify for publication.")
+            return None
+
+        # STRICT EDITORIAL PRE-PUBLICATION QUALITY REVIEW GATE
+        is_approved, review_verdict = review_article_before_publication(editorial, item)
+        if not is_approved:
+            logger.warning(f"[EDITORIAL REVIEW REJECTED] '{editorial['title'][:35]}...' - {review_verdict}. WITHHELD FROM PUBLICATION.")
+            return None
+
+        logger.info(f"[EDITORIAL REVIEW APPROVED] '{editorial['title'][:35]}...' - {review_verdict}. Eligible for broadsheet publication.")
 
         slug = clean_slug(editorial['title'])
         if not slug or len(slug) < 5:

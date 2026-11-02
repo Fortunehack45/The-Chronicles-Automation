@@ -1238,12 +1238,41 @@ class SupabaseClient:
         return None
 
     def insert_article(self, article_payload: dict) -> bool:
-        """Insert a published article into tc_articles."""
+        """Insert a published article into tc_articles with automatic slug-conflict resolution."""
         try:
             req_url = f"{self.url}/rest/v1/tc_articles"
             resp = requests.post(req_url, json=article_payload, headers=self.headers, timeout=15)
             if resp.status_code in [200, 201]:
                 return True
+
+            # Handle slug collision (409 Conflict)
+            if resp.status_code == 409 or "tc_articles_slug_key" in resp.text:
+                orig_slug = article_payload.get('slug', '')
+                logger.warning(f"Slug collision for '{orig_slug}' (409 Conflict). Attempting update or unique slug fallback...")
+
+                # Option 1: Try updating the existing record if it was an older/archived dispatch
+                patch_url = f"{self.url}/rest/v1/tc_articles?slug=eq.{orig_slug}"
+                patch_resp = requests.patch(patch_url, json=article_payload, headers=self.headers, timeout=15)
+                if patch_resp.status_code in [200, 204]:
+                    try:
+                        updated_rows = patch_resp.json()
+                        if updated_rows and len(updated_rows) > 0:
+                            logger.info(f"Successfully updated existing article record for slug '{orig_slug}'")
+                            return True
+                    except Exception:
+                        if patch_resp.status_code == 204:
+                            return True
+
+                # Option 2: Fallback to inserting with unique slug suffix so no generated report is lost
+                unique_slug = f"{orig_slug[:180]}-{uuid.uuid4().hex[:6]}"
+                article_payload['slug'] = unique_slug
+                retry_resp = requests.post(req_url, json=article_payload, headers=self.headers, timeout=15)
+                if retry_resp.status_code in [200, 201]:
+                    logger.info(f"Successfully inserted article with resolved slug '{unique_slug}'")
+                    return True
+                else:
+                    logger.error(f"Retry insert failed ({retry_resp.status_code}): {retry_resp.text}")
+                    return False
             else:
                 logger.error(f"Insert failed ({resp.status_code}): {resp.text}")
                 return False
@@ -1561,30 +1590,51 @@ def generate_broadsheet_article_native_gemini(title: str, prompt: str) -> str:
         return ""
     candidate_models = [
         "gemini-3.8-flash",
-        "gemini-3.8-flash-lite",
-        "gemini-3.8-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash"
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
     ]
     for m in candidate_models:
-        try:
-            response = gemini_client.models.generate_content(
-                model=m,
-                contents=prompt,
-                config={'temperature': 0.7}
-            )
-            if response and response.text:
-                result_text = response.text.strip()
-                words = len(result_text.split())
-                if words >= 1000:
-                    logger.info(f"Native Gemini ({m}) successfully generated broadsheet report ({words} words) for '{title[:35]}...'")
-                    return result_text
-        except Exception as e:
-            logger.warning(f"Native Gemini ({m}) failed: {e}")
-    return ""
+        for attempt in range(2):
+            try:
+                result_text = ""
+                # Attempt with interactions API if available
+                if hasattr(gemini_client, 'interactions'):
+                    try:
+                        interaction = gemini_client.interactions.create(
+                            model=m,
+                            input=prompt,
+                            generation_config={"thinking_level": "low"}
+                        )
+                        if interaction and getattr(interaction, 'output_text', None):
+                            result_text = interaction.output_text.strip()
+                    except Exception as ex_inter:
+                        logger.debug(f"Interactions API fallback for {m}: {ex_inter}")
 
+                # Standard generate_content
+                if not result_text:
+                    response = gemini_client.models.generate_content(
+                        model=m,
+                        contents=prompt,
+                        config={'temperature': 0.7}
+                    )
+                    if response and response.text:
+                        result_text = response.text.strip()
+
+                if result_text:
+                    words = len(result_text.split())
+                    if words >= 1000:
+                        logger.info(f"Native Gemini ({m}) successfully generated broadsheet report ({words} words) for '{title[:35]}...'")
+                        return result_text
+                break
+            except Exception as e:
+                err_msg = str(e)
+                if ("503" in err_msg or "UNAVAILABLE" in err_msg) and attempt == 0:
+                    logger.warning(f"Native Gemini ({m}) 503 high demand spike. Retrying in 2s...")
+                    time.sleep(2)
+                    continue
+                logger.warning(f"Native Gemini ({m}) failed: {e}")
+                break
+    return ""
 
 def generate_broadsheet_article_openrouter(title: str, raw_text: str, category: str, dateline: str) -> str:
     """
@@ -2534,7 +2584,7 @@ def run_pipeline(
             for item in unique_candidates
         }
         try:
-            for future in as_completed(futures, timeout=180):
+            for future in as_completed(futures, timeout=360):
                 item = futures[future]
                 try:
                     res = future.result()
@@ -2544,7 +2594,7 @@ def run_pipeline(
                 except Exception as e:
                     logger.warning(f"Error in publishing task for '{item.get('title', '')[:30]}': {e}")
         except TimeoutError:
-            logger.warning("Batch processing reached 180s safety window. Proceeding with sweep completion.")
+            logger.warning("Batch processing reached 360s safety window. Proceeding with sweep completion.")
 
     elapsed = round(time.time() - start_time, 2)
     logger.info(f"Sweep completed in {elapsed}s: Successfully processed {published_count} new broadsheet dispatches.")

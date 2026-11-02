@@ -2,13 +2,13 @@ name: The Chronicles 24/7 Automated News Wire Daemon
 
 on:
   schedule:
-    # 24/7 Continuous Newsroom Heartbeat: executes every 10 minutes
+    # 24/7 Watchdog Heartbeat: triggers every 10 minutes if runner ever stops
     - cron: '*/10 * * * *'
   workflow_dispatch: # Allows manual 1-click trigger from GitHub Actions
 
 concurrency:
   group: news-wire-automation
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   actions: write
@@ -17,7 +17,7 @@ permissions:
 jobs:
   ingest-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Automation Repository
@@ -36,10 +36,21 @@ jobs:
 
       - name: Execute News Wire Ingestion Sweep (3.5k - 8k Words Multi-Model Cascade)
         id: news_sweep
+        timeout-minutes: 10
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python scripts/news_pipeline.py --once --batch-size 8
+          python scripts/news_pipeline.py --once --batch-size 6
+
+      - name: Autonomous News Wire Self-Relay (Continuous 24/7 Loop)
+        if: always() && !cancelled()
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== 24/7 Continuous Loop Relay Triggered ==="
+          echo "Sweep completed or reached safety threshold. Spawning next continuous run..."
+          sleep 20
+          gh workflow run news_pipeline.yml --repo Fortunehack45/The-Chronicles-Automation || true

@@ -1559,7 +1559,15 @@ def generate_broadsheet_article_native_gemini(title: str, prompt: str) -> str:
     """Invokes Google Gemini SDK directly using GEMINI_API_KEY as primary/fallback."""
     if not gemini_client:
         return ""
-    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    candidate_models = [
+        "gemini-3.8-flash",
+        "gemini-3.8-flash-lite",
+        "gemini-3.8-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash"
+    ]
     for m in candidate_models:
         try:
             response = gemini_client.models.generate_content(
@@ -1568,11 +1576,11 @@ def generate_broadsheet_article_native_gemini(title: str, prompt: str) -> str:
                 config={'temperature': 0.7}
             )
             if response and response.text:
-                text = response.text.strip()
-                words = len(text.split())
-                if words >= 1500:
+                result_text = response.text.strip()
+                words = len(result_text.split())
+                if words >= 1000:
                     logger.info(f"Native Gemini ({m}) successfully generated broadsheet report ({words} words) for '{title[:35]}...'")
-                    return text
+                    return result_text
         except Exception as e:
             logger.warning(f"Native Gemini ({m}) failed: {e}")
     return ""
@@ -1641,8 +1649,13 @@ Provide only the exhaustive long-form broadsheet journalistic piece.
 
     generated_text = ""
 
-    # Pass 1: Try OpenRouter Cascade
-    if OPENROUTER_API_KEY:
+    # Pass 1 Priority: Native Google Gemini (Fast, robust, dedicated key)
+    if gemini_client:
+        logger.info(f"Engaging Native Google Gemini Client for '{title[:35]}...'")
+        generated_text = generate_broadsheet_article_native_gemini(title, prompt)
+
+    # Pass 1 Fallback: OpenRouter Cascade if Native Gemini not configured or exhausted
+    if not generated_text and OPENROUTER_API_KEY:
         for model_name in OPENROUTER_CASCADE_MODELS:
             data = {
                 "model": model_name,
@@ -1665,17 +1678,13 @@ Provide only the exhaustive long-form broadsheet journalistic piece.
                             break
                         else:
                             logger.warning(f"OpenRouter ({model_name}) draft too brief ({words} words); trying next model in cascade...")
-                elif resp.status_code == 402:
-                    logger.warning(f"OpenRouter model '{model_name}' returned HTTP 402 (Zero/Insufficient credits); switching to free or next model...")
+                elif resp.status_code in (402, 429):
+                    logger.warning(f"OpenRouter quota/credit limit reached (HTTP {resp.status_code}) on '{model_name}'. Halting OpenRouter cascade...")
+                    break
                 else:
                     logger.warning(f"OpenRouter model '{model_name}' returned HTTP {resp.status_code}: {resp.text[:80]}; switching to next model...")
             except Exception as e:
                 logger.warning(f"OpenRouter model '{model_name}' failed ({e}); switching to next model...")
-
-    # Pass 1 Fallback: Native Google Gemini
-    if not generated_text and gemini_client:
-        logger.info(f"OpenRouter cascade exhausted. Engaging Native Google Gemini Client for '{title[:35]}...'")
-        generated_text = generate_broadsheet_article_native_gemini(title, prompt)
 
     if not generated_text:
         return ""
@@ -1706,8 +1715,12 @@ CRITICAL EDITORIAL & FORMATTING RULES:
 5. Write in rich, literary, prestige broadsheet prose. Provide ONLY the continuation chapters."""
 
         continuation = ""
-        # Try OpenRouter free models first for continuation
-        if OPENROUTER_API_KEY:
+        # Continuation Priority: Native Google Gemini
+        if gemini_client:
+            continuation = generate_broadsheet_article_native_gemini(title, expansion_prompt)
+
+        # Continuation Fallback: OpenRouter
+        if not continuation and OPENROUTER_API_KEY:
             for model_name in OPENROUTER_CASCADE_MODELS[:4]:
                 try:
                     data = {
@@ -1725,11 +1738,10 @@ CRITICAL EDITORIAL & FORMATTING RULES:
                             if len(cont.split()) >= 1000:
                                 continuation = cont
                                 break
+                    elif resp.status_code in (402, 429):
+                        break
                 except Exception:
                     pass
-
-        if not continuation and gemini_client:
-            continuation = generate_broadsheet_article_native_gemini(title, expansion_prompt)
 
         if continuation:
             generated_text = generated_text + "\n\n" + continuation

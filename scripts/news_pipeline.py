@@ -1695,16 +1695,15 @@ Here is the excerpt from Part 1:
 
 MANDATORY EDITORIAL INSTRUCTION:
 DO NOT REPEAT previous text or repeat the introduction.
-Continue the investigation immediately by writing at least 2,000 to 3,500 additional words across 5 to 7 deep investigative chapters:
-- ## Forensic Stakeholder Deposition & Conflicts of Interest
-- ## Statutory Disclosures, Financial Discrepancies & Regulatory Audits
-- ## Socio-Economic Ripples and Community Impact Across the Beat
-- ## Unvarnished On-the-Record Official Quotes:
-  Incorporate at least two substantive verbatim quotes using:
-  > "Detailed official statement or witness testimony..." - Full Name, Title
-- ## Institutional Prognosis and Five-Year Horizon
+Continue the investigation immediately by writing at least 2,000 to 3,500 additional words across 5 to 7 deep investigative chapters.
 
-Write in rich, literary, prestige broadsheet prose. Provide ONLY the continuation chapters."""
+CRITICAL EDITORIAL & FORMATTING RULES:
+1. Provide unique, organic, story-specific chapter headlines relevant to '{title}' (e.g. '## Behind the Closed-Door Negotiations', '## Financial Records and Contractual Irregularities', '## Repercussions Across Regional Markets'). NEVER use generic placeholder headings like 'Unvarnished On-the-Record Official Quotes', 'Forensic Stakeholder Deposition', 'Section Heading', or 'Chapter'.
+2. Seamlessly integrate at least two on-the-record verbatim quotes from real persons or official spokespersons using markdown blockquote syntax:
+> "Direct on-the-record quote from a named individual..." - Firstname Lastname, Official Title
+3. STRICT PROHIBITION: NEVER use markdown asterisks (**) or underscores inside speaker names or titles. All names must be plain text without asterisks.
+4. NEVER output placeholder text like "Detailed official statement" or "witness testimony". Use authentic or contextually sound statements.
+5. Write in rich, literary, prestige broadsheet prose. Provide ONLY the continuation chapters."""
 
         continuation = ""
         # Try OpenRouter free models first for continuation
@@ -1793,6 +1792,7 @@ def clean_and_format_article_html(html: str) -> str:
         q_part = m.group(1).strip()
         spk_part = m.group(2).strip()
         spk = re.sub(r'^[—–-]+\s*', '', spk_part).strip().strip('—–- .,"\'')
+        spk = re.sub(r'[*_]+', '', spk).strip()
         return f'<blockquote>{q_part}<footer>{spk}</footer></blockquote>'
 
     h = re.sub(
@@ -1807,6 +1807,7 @@ def clean_and_format_article_html(html: str) -> str:
         prefix = m.group(1)
         q_text = m.group(2).strip()
         spk = re.sub(r'^[—–-]+\s*', '', m.group(3).strip()).strip().strip('—–- .,"\'')
+        spk = re.sub(r'[*_]+', '', spk).strip()
         return f'{prefix}<p>&ldquo;{q_text}&rdquo;</p><footer>{spk}</footer></blockquote>'
 
     h = re.sub(
@@ -1825,6 +1826,7 @@ def clean_and_format_article_html(html: str) -> str:
     def repl_adj_attr(m):
         fig_head = m.group(1).strip()
         spk = re.sub(r'^[—–-]+\s*', '', m.group(2).strip().strip('—–- .,'))
+        spk = re.sub(r'[*_]+', '', spk).strip()
         return f'{fig_head}<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{spk}</span></figcaption></figure>'
 
     while adj_attr_regex.search(h):
@@ -1861,12 +1863,14 @@ def clean_and_format_article_html(html: str) -> str:
         if foot_match:
             raw_spk = re.sub(r'<[^>]+>', '', foot_match.group(1)).strip().strip('—–- .,')
             raw_spk = re.sub(r'^[—–-]+\s*', '', raw_spk).strip()
+            raw_spk = re.sub(r'[*_]+', '', raw_spk).strip()
             if not any(k in raw_spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']):
                 spk = raw_spk
             inner = re.sub(r'<(?:footer|figcaption)[^>]*>[\s\S]*?</(?:footer|figcaption)>', '', inner, flags=re.IGNORECASE).strip()
         elif trailing_spk:
             spk = trailing_spk.strip().strip('—–- .,')
             spk = re.sub(r'^[—–-]+\s*', '', spk).strip()
+            spk = re.sub(r'[*_]+', '', spk).strip()
 
         quote_text = re.sub(r'</?(?:p|blockquote)[^>]*>', '', inner).strip()
         quote_text = re.sub(r'^(?:&ldquo;|“|"|\'|‘|\s)+|(?:&rdquo;|”|"|\'|’|\s)+$', '', quote_text).strip()
@@ -1989,7 +1993,16 @@ def clean_and_format_article_html(html: str) -> str:
     # 16. Convert ASCII workflow arrows (+--->) into broadsheet callouts
     h = re.sub(r'<p>\s*\+--+>\s*(.*?)\s*<\/p>', r'<div class="my-2 py-2 px-3.5 border-l-2 border-[#E50914] bg-[#161616] text-stone-300 text-xs sm:text-sm flex items-center gap-2.5 rounded-r-xs"><span class="text-[#E50914] font-bold">&rarr;</span><span>\1</span></div>', h)
 
-    # 17. Clean up redundant empty tags and residual paragraph wrappers
+    # 17. Clean up prompt leaks, placeholder quotes, and raw markdown artifacts
+    h = re.sub(r'<figure\b[^>]*>[\s\S]*?(?:Detailed official statement|witness testimony|Quote from named individual)[\s\S]*?</figure>', '', h, flags=re.IGNORECASE)
+    h = re.sub(r'<h[1-6][^>]*>[^<]*?(?:Unvarnished[\w\s]*On[\w\s]*the[\w\s]*Record|Unvarnished|Official Quotes|Section Heading)[^<]*?</h[1-6]>', '', h, flags=re.IGNORECASE)
+    h = re.sub(r'<p>\s*(?:These verbatim excerpts capture|These statements, delivered|Here is Part 2|Continuation chapters|\[BEGIN PART)[\s\S]*?</p>', '', h, flags=re.IGNORECASE)
+    h = re.sub(r'(<figcaption\b[^>]*>[\s\S]*?)\*{1,3}(.*?)\*{1,3}', r'\1\2', h)
+    h = re.sub(r'(<h[1-6][^>]*>)([\s\S]*?)(</h[1-6]>)', lambda m: f"{m.group(1)}{re.sub(r'[*_]+', '', m.group(2)).strip()}{m.group(3)}", h)
+    h = re.sub(r'\*\*([^\*\n]+?)\*\*', r'<strong>\1</strong>', h)
+    h = re.sub(r'\*{2,}', '', h)
+
+    # 18. Clean up redundant empty tags and residual paragraph wrappers
     h = re.sub(r'<p>\s*</p>', '', h)
     h = re.sub(r'<p>\s*(<(?:figure|div|table|h[1-6]|ul|ol|pre)\b)', r'\1', h)
     h = re.sub(r'(<\/(?:figure|div|table|h[1-6]|ul|ol|pre)>)\s*<\/p>', r'\1', h)
@@ -2030,6 +2043,12 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
 
         h_match = re.match(r'^#{1,3}\s+(.+)', l)
         if h_match:
+            h_text = h_match.group(1).strip()
+            h_text = re.sub(r'[*_]+', '', h_text).strip()
+            cleaned_h = re.sub(r'^(?:#{1,4}\s*|(?:Section\s+Heading|Chapter\s+\d+|Section\s+\d+|Part\s+\d+|Heading):\s*)+', '', h_text, flags=re.IGNORECASE).strip()
+            if any(k in cleaned_h.lower() for k in ['unvarnished', 'official quotes', 'section heading', 'placeholder']):
+                continue
+
             if current_paras:
                 p_group = "".join([f"<p>{p}</p>" for p in current_paras])
                 if current_heading:
@@ -2037,36 +2056,42 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
                 else:
                     sections_html.append(p_group)
                 current_paras = []
-            h_text = h_match.group(1).strip()
-            current_heading = re.sub(r'^(?:#{1,4}\s*|(?:Section\s+Heading|Chapter\s+\d+|Section\s+\d+|Part\s+\d+|Heading):\s*)+', '', h_text, flags=re.IGNORECASE).strip()
+            current_heading = cleaned_h
             continue
 
         q_match = re.match(r'^>\s*(.+)', l)
         if q_match:
             raw_q = q_match.group(1).strip()
+            # Drop prompt placeholder quotes
+            if any(p in raw_q.lower() for p in ['detailed official statement', 'witness testimony', 'quote from named individual']):
+                continue
+
             # Split quote and speaker if present e.g. "Quote" - Name
-            spk = ""
-            spk_match = re.search(r'["”]\s*[-—–]\s*(.+)$', raw_q)
+            spk = ''
+            spk_match = re.search(r'["\u201c\u201d]\s*[-—–\u2013\u2014]\s*(.+)$', raw_q)
             if spk_match:
                 spk = spk_match.group(1).strip('\'"`“” \t\r\n— -')
+                spk = re.sub(r'[*_]+', '', spk).strip()
                 raw_q = raw_q[:spk_match.start() + 1]
 
-            q_clean = re.sub(r'^[“"\'‘\s]+|[”"\'’\s]+$', '', raw_q).strip()
+            q_clean = re.sub(r'^[“"\'‘\u2018\u201c\s]+|[”"\'’\u2019\u201d\s]+$', '', raw_q).strip()
+            q_clean = re.sub(r'[*_]+', '', q_clean).strip()
             q_clean = re.sub(r'[,;:\s]+$', '', q_clean)
-            q_clean = re.sub(r'[,;]\.([”"’\'])', r'.\1', q_clean)
-            q_clean = re.sub(r'\.[,;]([”"’\'])', r'.\1', q_clean)
+            q_clean = re.sub(r'[,;]\.([”"’\u2019\u201d\'])', r'.\1', q_clean)
+            q_clean = re.sub(r'\.[,;]([”"’\u2019\u201d\'])', r'.\1', q_clean)
             q_clean = re.sub(r'([.,;!?])[.,;!?]+', r'\1', q_clean)
             if q_clean and not q_clean.endswith(('.', '!', '?')):
                 q_clean += '.'
 
             # Only show speaker if it's a real name or institution
-            spk_clean = spk if spk and not any(k in spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']) else ""
+            spk_clean = spk if spk and not any(k in spk.lower() for k in ['desk', 'affairs', 'statutory', 'disclosure', 'editorial']) else ''
+            spk_clean = re.sub(r'[*_]+', '', spk_clean).strip()
             fig_cap = f'<figcaption class="mt-3.5 text-xs font-mono-meta text-stone-400 not-italic uppercase tracking-wider flex items-center gap-2"><span class="w-5 h-0.5 bg-[#E50914] inline-block shrink-0"></span><span>{spk_clean}</span></figcaption>' if spk_clean else ''
 
             if current_paras:
-                p_group = "".join([f"<p>{p}</p>" for p in current_paras])
+                p_group = ''.join([f'<p>{p}</p>' for p in current_paras])
                 if current_heading:
-                    sections_html.append(f"<h3>{current_heading}</h3>{p_group}")
+                    sections_html.append(f'<h3>{current_heading}</h3>{p_group}')
                     current_heading = None
                 else:
                     sections_html.append(p_group)
@@ -2076,6 +2101,8 @@ def format_gemini_broadsheet_html(title: str, text: str, category: str, dateline
             continue
 
         clean_p = re.sub(r'[*_]{2,}', '', l).strip()
+        if any(clean_p.lower().startswith(m) for m in ['these verbatim excerpts', 'these statements, delivered', 'here is part 2', '[begin part', 'continuation chapters']):
+            continue
         if len(clean_p) > 25:
             current_paras.append(clean_p)
 
@@ -2264,6 +2291,14 @@ def review_article_before_publication(editorial: dict, item: dict) -> Tuple[bool
     summary_box = soup.find('h4', string=re.compile(r'summary', re.IGNORECASE))
     if not summary_box and 'Summary</h4>' not in html:
         return False, "Missing Key Developments executive summary box"
+        
+    # Check 6: Quality Hygiene - No raw markdown bold (**) or prompt leaks
+    if '**' in html:
+        return False, "Unprocessed raw markdown bold (**) found in article content"
+    if 'Detailed official statement' in html or 'witness testimony' in html.lower():
+        return False, "Prompt placeholder quote text detected in article content"
+    if 'Unvarnished On' in html or 'Unvarnished' in html:
+        return False, "Prompt template heading (Unvarnished) detected in article content"
         
     return True, f"Approved ({words} words, {len(h_substantive)} chapters, verified broadsheet formatting)"
 
